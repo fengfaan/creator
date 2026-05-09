@@ -214,6 +214,43 @@ class XhsPublishSpike {
         takeScreenshot("fill-body-failed");
     }
 
+    private void clickPublish() {
+        long start = System.currentTimeMillis();
+        String[] selectors = {
+                "button:has-text('发布')",
+                "button:has-text('发布笔记')",
+                "button.publish-btn",
+                ".submit-btn"
+        };
+        for (String selector : selectors) {
+            try {
+                Locator btn = page.locator(selector).first();
+                if (btn.isVisible() && btn.isEnabled()) {
+                    btn.click();
+                    page.waitForTimeout(5000);
+
+                    String resultUrl = page.url();
+                    boolean success = resultUrl.contains("/publish/success")
+                            || resultUrl.contains("/note/")
+                            || page.locator("text=发布成功").isVisible()
+                            || page.locator("text=已发布").isVisible();
+
+                    if (success) {
+                        record("Click Publish", true, selector, System.currentTimeMillis() - start, null);
+                    } else {
+                        takeScreenshot("publish-result");
+                        record("Click Publish", true, selector, System.currentTimeMillis() - start,
+                                "Published but success indicator unclear — check screenshot");
+                    }
+                    return;
+                }
+            } catch (Exception ignored) {}
+        }
+        record("Click Publish", false, "all selectors exhausted", System.currentTimeMillis() - start,
+                "Could not locate publish button");
+        takeScreenshot("click-publish-failed");
+    }
+
     // ── Assessment Reporting ────────────────────────────────────
 
     record StepResult(String name, boolean passed, String selector, long durationMs, String error) {}
