@@ -52,8 +52,46 @@ class XhsPublishSpike {
 
     @Test
     void fullPublishFlow() {
-        // Each step is a method call below — built incrementally in Tasks 4-6
-        // This test will be completed in Task 6
+        long start;
+
+        // ── Step 1: Session & Login ──
+        start = System.currentTimeMillis();
+        try {
+            createOrRestoreSession();
+            page = context.newPage();
+
+            boolean loggedIn = isLoggedIn();
+            if (!loggedIn) {
+                System.out.println("[Login] Session expired or first run. Waiting for re-login...");
+                if (Files.exists(SESSION_FILE)) {
+                    Files.delete(SESSION_FILE);
+                    System.out.println("[Login] Deleted expired session file.");
+                }
+                waitForLoginAndSave();
+                page.navigate(PUBLISH_URL);
+                page.waitForLoadState(LoadState.NETWORKIDLE);
+            } else {
+                System.out.println("[Login] Session valid, already on publish page.");
+                context.storageState(new BrowserContext.StorageStateOptions().setPath(SESSION_FILE));
+            }
+            record("Login & Session", true, "URL check", System.currentTimeMillis() - start, null);
+        } catch (Exception e) {
+            record("Login & Session", false, "URL check", System.currentTimeMillis() - start, e.getMessage());
+            takeScreenshot("login-failed");
+            return;
+        }
+
+        // ── Step 2: Upload Image ──
+        uploadImage();
+
+        // ── Step 3: Fill Title ──
+        fillTitle("[TEST] RPA Spike 验证标题");
+
+        // ── Step 4: Fill Body ──
+        fillBody("这是一条 RPA Spike 自动化测试内容，验证发布流程是否可行。可手动删除。");
+
+        // ── Step 5: Click Publish ──
+        clickPublish();
     }
 
     // ── Session Management ──────────────────────────────────────
