@@ -1,5 +1,6 @@
 import { PanelLeft, Settings, Sun, Moon, ChevronDown, Check, Send } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { api } from "../api";
 
 interface TopBarProps {
   fileName: string;
@@ -17,6 +18,14 @@ export function TopBar({ fileName, onToggleSidebar, isDark, onToggleTheme, onPub
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [activeIdx, setActiveIdx] = useState(0);
 
+  useEffect(() => {
+    api.settings.get("selected_model").then((item) => {
+      if (item?.value && MODELS.includes(item.value)) {
+        setModel(item.value);
+      }
+    }).catch(() => {});
+  }, []);
+
   // Close dropdown on outside click
   useEffect(() => {
     if (!open) return;
@@ -31,7 +40,12 @@ export function TopBar({ fileName, onToggleSidebar, isDark, onToggleTheme, onPub
     if (e.key === "Escape") { setOpen(false); return; }
     if (e.key === "ArrowDown") { e.preventDefault(); setActiveIdx((i) => (i + 1) % MODELS.length); }
     if (e.key === "ArrowUp") { e.preventDefault(); setActiveIdx((i) => (i - 1 + MODELS.length) % MODELS.length); }
-    if (e.key === "Enter") { setModel(MODELS[activeIdx]); setOpen(false); }
+    if (e.key === "Enter") {
+      const m = MODELS[activeIdx];
+      setModel(m);
+      setOpen(false);
+      api.settings.set("selected_model", m).catch(() => {});
+    }
   };
 
   return (
@@ -107,7 +121,7 @@ export function TopBar({ fileName, onToggleSidebar, isDark, onToggleTheme, onPub
                 key={m}
                 role="option"
                 aria-selected={m === model}
-                onClick={() => { setModel(m); setOpen(false); }}
+                onClick={() => { setModel(m); setOpen(false); api.settings.set("selected_model", m).catch(() => {}); }}
                 className="flex items-center justify-between w-full h-9 px-3 transition-colors hover:bg-[var(--bg-hover)] active:bg-[var(--bg-pressed)]"
                 style={{ fontSize: 13, background: idx === activeIdx ? "var(--bg-hover)" : undefined }}
               >

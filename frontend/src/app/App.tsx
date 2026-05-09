@@ -1,55 +1,29 @@
-import { useEffect, useRef, useState, useMemo } from "react";
+import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { TopBar } from "./components/top-bar";
 import { FileSidebar } from "./components/file-sidebar";
 import { EditorPanel } from "./components/editor-panel";
 import { PreviewPanel } from "./components/preview-panel";
 import { PublishModal } from "./components/publish-modal";
-
-const SAMPLE = `# 如何写好一篇小红书爆款笔记
-
-> 内容创作不是玄学，是可拆解的方法论。
-
-## 一、选题决定 80% 的成败
-
-爆款笔记往往源自一个**好选题**。一个吸引人的选题应当具备：
-
-- 强烈的情绪共鸣
-- 明确的目标人群
-- 可视化的内容形态
-- 与平台调性相符
-
-## 二、标题公式
-
-\`\`\`
-痛点 + 数字 + 解决方案 = 高点击率
-\`\`\`
-
-例如："**3 步搞定**周报，效率提升 200%"。
-
-## 三、配图与排版
-
-封面图至关重要，建议使用 [Figma](https://figma.com) 设计。
-
-> 记住：好内容值得被看见，认真打磨每一处细节。
-
-#小红书 #内容创作 #自媒体
-`;
+import { api } from "./api";
 
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isDark, setIsDark] = useState(false);
-  const [fileName, setFileName] = useState("如何写好小红书.md");
-  const [activeId, setActiveId] = useState("f1");
-  const [title, setTitle] = useState("如何写好一篇小红书爆款笔记");
-  const [content, setContent] = useState(SAMPLE);
+  const [fileName, setFileName] = useState("");
+  const [filePath, setFilePath] = useState("");
+  const [activeId, setActiveId] = useState("");
+  const [title, setTitle] = useState("");
+  const [content, setContent] = useState("");
   const [leftPct, setLeftPct] = useState(50);
   const [publishOpen, setPublishOpen] = useState(false);
+  const [savedContent, setSavedContent] = useState("");
   const dragRef = useRef<{ dragging: boolean; startX: number; startPct: number }>({
     dragging: false,
     startX: 0,
     startPct: 50,
   });
   const containerRef = useRef<HTMLDivElement>(null);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
@@ -78,8 +52,39 @@ export default function App() {
     (e.currentTarget as HTMLElement).classList.add("dragging");
   };
 
+  const loadFile = useCallback(async (id: string, name: string, path: string) => {
+    setActiveId(id);
+    setFileName(name);
+    setFilePath(path);
+    try {
+      const text = await api.files.readContent(path);
+      setContent(text);
+      setSavedContent(text);
+      const heading = text.match(/^#\s+(.+)/m);
+      setTitle(heading ? heading[1] : name.replace(/\.md$/, ""));
+    } catch {
+      setContent("");
+      setTitle(name.replace(/\.md$/, ""));
+    }
+  }, []);
+
+  const handleContentChange = useCallback((newContent: string) => {
+    setContent(newContent);
+    if (!filePath) return;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(async () => {
+      try {
+        await api.files.save(filePath, newContent);
+        setSavedContent(newContent);
+      } catch (e) {
+        console.error("Auto-save failed:", e);
+      }
+    }, 1000);
+  }, [filePath]);
+
   const wordCount = useMemo(() => content.replace(/\s/g, "").length, [content]);
   const lineCount = useMemo(() => content.split("\n").length, [content]);
+  const isDirty = content !== savedContent;
 
   return (
     <div className={isDark ? "dark" : ""}>
@@ -100,16 +105,14 @@ export default function App() {
           <div className={`sidebar-wrap${sidebarOpen ? "" : " collapsed"}`} style={{ width: 240 }}>
             <FileSidebar
               activeId={activeId}
-              onSelect={(id, name) => {
-                setActiveId(id);
-                setFileName(name);
-              }}
+              activePath={filePath}
+              onSelect={loadFile}
             />
           </div>
 
           <div id="main-editor" ref={containerRef} className="flex-1 flex min-w-0 min-h-0" tabIndex={-1}>
             <div style={{ width: `${leftPct}%` }} className="flex flex-col min-w-0 min-h-0">
-              <EditorPanel title={title} setTitle={setTitle} content={content} setContent={setContent} />
+              <EditorPanel title={title} setTitle={setTitle} content={content} setContent={handleContentChange} />
             </div>
             <div className="resize-divider" onMouseDown={startDrag} onDoubleClick={() => setLeftPct(50)} />
             <div style={{ width: `${100 - leftPct}%` }} className="flex flex-col min-w-0 min-h-0">
@@ -118,7 +121,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* Status bar */}
         <div
           className="flex items-center justify-between h-7 px-4 shrink-0"
           role="status"
@@ -134,10 +136,10 @@ export default function App() {
             <span className="flex items-center gap-1">
               <span
                 className="inline-block w-1.5 h-1.5 rounded-full"
-                style={{ background: "var(--status-success)" }}
+                style={{ background: isDirty ? "var(--status-warning)" : "var(--status-success)" }}
                 aria-hidden="true"
               />
-              已自动保存
+              {isDirty ? "未保存" : "已自动保存"}
             </span>
             <span>UTF-8</span>
             <span>Markdown</span>
