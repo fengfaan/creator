@@ -1,0 +1,103 @@
+/* Markdown editor syntax highlighting */
+.md-line { font-family: var(--font-mono); }
+.md-heading { color: #2563EB; font-weight: 600; }
+.md-quote { color: #16A34A; font-style: italic; }
+.md-list { color: #CA8A04; }
+.md-code-fence { color: #6B7280; }
+.md-bold { color: #EA580C; font-weight: 600; }
+.md-italic { color: #DB2777; font-style: italic; }
+.md-inline-code { color: #0F766E; background: #F0FDFA; padding: 0 3px; border-radius: 3px; }
+.md-link { color: #14B8A6; }
+.md-tag { color: #FF2442; }
+
+.ai-caret {
+  display: inline-block;
+  width: 6px;
+  height: 14px;
+  background: var(--accent-ai);
+  margin-left: 2px;
+  vertical-align: middle;
+  animation: ai-blink 0.8s steps(2) infinite;
+}
+@keyframes ai-blink { 50% { opacity: 0; } }
+
+/* Resizable divider */
+.resize-divider {
+  width: 6px;
+  cursor: col-resize;
+  position: relative;
+  background: transparent;
+  flex-shrink: 0;
+  /* Enlarge touch/mouse grab area to 16px centered */
+  padding: 0 5px;
+  margin: 0 -5px;
+}
+.resize-divider::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border-default);
+  transform: translateX(-50%);
+  transition: background 150ms ease;
+}
+.resize-divider:hover::before,
+.resize-divider.dragging::before {
+  background: var(--accent-primary);
+  width: 2px;
+}
+
+/* Focus ring — global keyboard focus indicator */
+:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+button:focus:not(:focus-visible),
+input:focus:not(:focus-visible),
+textarea:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .ai-caret { animation: none; opacity: 1; }
+  .animate-spin { animation: none; }
+  .resize-divider::before { transition: none; }
+  * { transition-duration: 0ms !important; animation-duration: 0ms !important; }
+}
+
+/* Sidebar slide transition */
+.sidebar-wrap {
+  transition: width 200ms ease-in-out, opacity 150ms ease;
+  overflow: hidden;
+}
+.sidebar-wrap.collapsed {
+  width: 0 !important;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Skip link */
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: 0;
+  z-index: 9999;
+  padding: 8px 16px;
+  background: var(--accent-primary);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 0 0 6px 0;
+  text-decoration: none;
+}
+.skip-link:focus {
+  top: 0;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.12); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.2); }
