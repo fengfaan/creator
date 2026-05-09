@@ -134,6 +134,86 @@ class XhsPublishSpike {
         System.out.println("[Session] Session saved to " + SESSION_FILE);
     }
 
+    // ── Publish Steps ──────────────────────────────────────────
+
+    private void uploadImage() {
+        long start = System.currentTimeMillis();
+        String selector = "input[type='file']";
+        try {
+            Locator fileInput = page.locator(selector);
+            fileInput.waitFor(new Locator.WaitForOptions().setTimeout(10_000));
+
+            Path coverPath = Paths.get("src/test/resources/spike-cover.jpg")
+                    .toAbsolutePath();
+            if (!Files.exists(coverPath)) {
+                throw new RuntimeException("Test cover image not found: " + coverPath);
+            }
+
+            fileInput.setInputFiles(coverPath);
+            page.waitForTimeout(3000);
+            record("Upload Image", true, selector, System.currentTimeMillis() - start, null);
+        } catch (Exception e) {
+            record("Upload Image", false, selector, System.currentTimeMillis() - start, e.getMessage());
+            takeScreenshot("upload-image-failed");
+        }
+    }
+
+    private void fillTitle(String title) {
+        long start = System.currentTimeMillis();
+        String[] selectors = {
+                "input[placeholder*='标题']",
+                "input[placeholder*='填写标题']",
+                "#title",
+                ".title-input input",
+                "input[maxlength='20']"
+        };
+        for (String selector : selectors) {
+            try {
+                Locator input = page.locator(selector).first();
+                if (input.isVisible()) {
+                    input.click();
+                    input.fill(title);
+                    record("Fill Title", true, selector, System.currentTimeMillis() - start, null);
+                    return;
+                }
+            } catch (Exception ignored) {}
+        }
+        try {
+            Locator editable = page.locator("[contenteditable='true']").first();
+            editable.click();
+            editable.fill(title);
+            record("Fill Title", true, "[contenteditable=true]", System.currentTimeMillis() - start, null);
+        } catch (Exception e) {
+            record("Fill Title", false, "all selectors exhausted", System.currentTimeMillis() - start, e.getMessage());
+            takeScreenshot("fill-title-failed");
+        }
+    }
+
+    private void fillBody(String body) {
+        long start = System.currentTimeMillis();
+        String[] selectors = {
+                "div[contenteditable='true']",
+                ".ql-editor",
+                ".editor-inner",
+                "textarea[placeholder*='正文']",
+                "textarea[placeholder*='描述']"
+        };
+        for (String selector : selectors) {
+            try {
+                Locator editor = page.locator(selector).first();
+                if (editor.isVisible()) {
+                    editor.click();
+                    page.keyboard().type(body, new Keyboard.TypeOptions().setDelay(10));
+                    record("Fill Body", true, selector, System.currentTimeMillis() - start, null);
+                    return;
+                }
+            } catch (Exception ignored) {}
+        }
+        record("Fill Body", false, "all selectors exhausted", System.currentTimeMillis() - start,
+                "Could not locate body editor");
+        takeScreenshot("fill-body-failed");
+    }
+
     // ── Assessment Reporting ────────────────────────────────────
 
     record StepResult(String name, boolean passed, String selector, long durationMs, String error) {}
