@@ -1,7 +1,6 @@
 package com.aiwriter.service;
 
 import com.aiwriter.model.FileInfo;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -10,19 +9,30 @@ import java.nio.file.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
-@Slf4j
 @Service
 public class FileService {
+    private static final Logger LOGGER = Logger.getLogger(FileService.class.getName());
 
     @Value("${app.data-dir}")
     private String dataDir;
 
+    @Value("${app.articles-dir:${app.data-dir}/articles}")
+    private String articlesDir;
+
     private Path articlesDir() {
-        return Path.of(dataDir, "articles").toAbsolutePath().normalize();
+        String configured = articlesDir == null || articlesDir.isBlank()
+                ? Path.of(dataDir, "articles").toString()
+                : articlesDir;
+        return Path.of(configured).toAbsolutePath().normalize();
     }
 
     private Path resolve(String relativePath) {
+        if (relativePath == null || relativePath.isBlank()) {
+            throw new IllegalArgumentException("Path is required");
+        }
         Path resolved = articlesDir().resolve(relativePath).normalize();
         if (!resolved.startsWith(articlesDir())) {
             throw new SecurityException("Path traversal detected");
@@ -60,7 +70,7 @@ public class FileService {
                     if (node != null) children.add(node);
                 });
             } catch (IOException e) {
-                log.error("Failed to list directory: {}", path, e);
+                LOGGER.log(Level.SEVERE, "Failed to list directory: " + path, e);
             }
             return FileInfo.builder()
                     .id(UUID.nameUUIDFromBytes(rel.getBytes()).toString())
@@ -96,6 +106,12 @@ public class FileService {
     }
 
     public String createFile(String name, String folder) throws IOException {
+        if (name == null || name.isBlank()) {
+            throw new IllegalArgumentException("File name is required");
+        }
+        if (name.contains("/") || name.contains("\\")) {
+            throw new SecurityException("Invalid file name");
+        }
         String rel = (folder == null || folder.isEmpty()) ? name : folder + "/" + name;
         if (!rel.endsWith(".md")) rel += ".md";
         Path file = resolve(rel);
@@ -112,9 +128,19 @@ public class FileService {
     }
 
     public String renameFile(String oldPath, String newName) throws IOException {
+        if (newName == null || newName.isBlank()) {
+            throw new IllegalArgumentException("New file name is required");
+        }
+        if (newName.contains("/") || newName.contains("\\")) {
+            throw new SecurityException("Invalid file name");
+        }
+        if (!newName.endsWith(".md")) newName += ".md";
         Path old = resolve(oldPath);
         if (!Files.exists(old)) throw new NoSuchFileException(old.toString());
         Path target = old.resolveSibling(newName);
+        if (!target.normalize().startsWith(articlesDir())) {
+            throw new SecurityException("Path traversal detected");
+        }
         if (Files.exists(target)) throw new FileAlreadyExistsException(newName);
         Files.move(old, target);
         String parent = oldPath.contains("/") ? oldPath.substring(0, oldPath.lastIndexOf('/')) : "";

@@ -4,27 +4,38 @@ import { api } from "../api";
 
 interface TopBarProps {
   fileName: string;
+  model: string;
   onToggleSidebar: () => void;
   isDark: boolean;
   onToggleTheme: () => void;
   onPublish: () => void;
+  onOpenSettings: () => void;
+  onModelChange: (model: string) => void;
 }
 
-const MODELS = ["DeepSeek-V3", "Claude Sonnet 4.6", "Qwen-Max"];
+const MODELS = ["deepseek-chat", "deepseek-reasoner", "qwen-max"];
 
-export function TopBar({ fileName, onToggleSidebar, isDark, onToggleTheme, onPublish }: TopBarProps) {
-  const [model, setModel] = useState(MODELS[0]);
+export function TopBar({
+  fileName,
+  model,
+  onToggleSidebar,
+  isDark,
+  onToggleTheme,
+  onPublish,
+  onOpenSettings,
+  onModelChange,
+}: TopBarProps) {
   const [open, setOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [activeIdx, setActiveIdx] = useState(0);
 
   useEffect(() => {
     api.settings.get("selected_model").then((item) => {
-      if (item?.value && MODELS.includes(item.value)) {
-        setModel(item.value);
+      if (item?.value) {
+        onModelChange(item.value);
       }
     }).catch(() => {});
-  }, []);
+  }, [onModelChange]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -42,7 +53,7 @@ export function TopBar({ fileName, onToggleSidebar, isDark, onToggleTheme, onPub
     if (e.key === "ArrowUp") { e.preventDefault(); setActiveIdx((i) => (i - 1 + MODELS.length) % MODELS.length); }
     if (e.key === "Enter") {
       const m = MODELS[activeIdx];
-      setModel(m);
+      onModelChange(m);
       setOpen(false);
       api.settings.set("selected_model", m).catch(() => {});
     }
@@ -50,7 +61,7 @@ export function TopBar({ fileName, onToggleSidebar, isDark, onToggleTheme, onPub
 
   return (
     <div
-      className="flex items-center h-12 px-3 gap-3 shrink-0"
+      className="app-topbar flex items-center h-12 px-3 gap-3 shrink-0"
       style={{ background: "var(--bg-surface)", borderBottom: "1px solid var(--border-default)" }}
     >
       <button
@@ -61,7 +72,7 @@ export function TopBar({ fileName, onToggleSidebar, isDark, onToggleTheme, onPub
         <PanelLeft size={18} strokeWidth={1.5} style={{ color: "var(--text-secondary)" }} />
       </button>
 
-      <div className="flex items-center gap-2 pr-3" style={{ borderRight: "1px solid var(--border-subtle)" }}>
+      <div className="brand-lockup flex items-center gap-2 pr-3" style={{ borderRight: "1px solid var(--border-subtle)" }}>
         <div
           className="w-6 h-6 rounded-md flex items-center justify-center"
           style={{ background: "var(--accent-primary)" }}
@@ -71,13 +82,13 @@ export function TopBar({ fileName, onToggleSidebar, isDark, onToggleTheme, onPub
         <span style={{ fontSize: 14, fontWeight: 600 }}>AI Writer</span>
       </div>
 
-      <div className="flex items-center gap-2 min-w-0">
+      <div className="breadcrumb flex items-center gap-2 min-w-0">
         <span style={{ color: "var(--text-secondary)", fontSize: 13 }} className="truncate">
           我的文稿 / <span style={{ color: "var(--text-primary)" }}>{fileName}</span>
         </span>
       </div>
 
-      <div className="flex-1 flex items-center justify-center gap-2">
+      <div className="model-status flex-1 flex items-center justify-center gap-2">
         <span
           className="inline-block w-2 h-2 rounded-full"
           style={{ background: "var(--accent-ai)", boxShadow: "0 0 0 3px rgba(139,92,246,0.15)" }}
@@ -87,9 +98,9 @@ export function TopBar({ fileName, onToggleSidebar, isDark, onToggleTheme, onPub
         </span>
       </div>
 
-      <div className="relative" ref={dropdownRef}>
+      <div className="model-picker relative" ref={dropdownRef}>
         <button
-          onClick={() => { setOpen(!open); setActiveIdx(MODELS.indexOf(model)); }}
+          onClick={() => { setOpen(!open); setActiveIdx(Math.max(0, MODELS.indexOf(model))); }}
           onKeyDown={handleDropdownKey}
           aria-label="切换 AI 模型"
           aria-expanded={open}
@@ -121,7 +132,7 @@ export function TopBar({ fileName, onToggleSidebar, isDark, onToggleTheme, onPub
                 key={m}
                 role="option"
                 aria-selected={m === model}
-                onClick={() => { setModel(m); setOpen(false); api.settings.set("selected_model", m).catch(() => {}); }}
+                onClick={() => { onModelChange(m); setOpen(false); api.settings.set("selected_model", m).catch(() => {}); }}
                 className="flex items-center justify-between w-full h-9 px-3 transition-colors hover:bg-[var(--bg-hover)] active:bg-[var(--bg-pressed)]"
                 style={{ fontSize: 13, background: idx === activeIdx ? "var(--bg-hover)" : undefined }}
               >
@@ -136,7 +147,7 @@ export function TopBar({ fileName, onToggleSidebar, isDark, onToggleTheme, onPub
       <button
         onClick={onPublish}
         aria-label="发布文章"
-        className="flex items-center gap-1.5 h-8 px-3 rounded-md transition-all hover:opacity-90 active:scale-[0.97]"
+        className="publish-button flex items-center gap-1.5 h-8 px-3 rounded-md transition-all hover:opacity-90 active:scale-[0.97]"
         style={{
           background: "var(--accent-cta)",
           color: "#fff",
@@ -145,7 +156,7 @@ export function TopBar({ fileName, onToggleSidebar, isDark, onToggleTheme, onPub
         }}
       >
         <Send size={13} strokeWidth={1.5} />
-        发布
+        <span className="publish-label">发布</span>
       </button>
 
       <button
@@ -161,7 +172,8 @@ export function TopBar({ fileName, onToggleSidebar, isDark, onToggleTheme, onPub
       </button>
 
       <button
-        className="p-1.5 rounded-md transition-colors hover:bg-[var(--bg-hover)] active:bg-[var(--bg-pressed)] min-w-[44px] min-h-[44px] flex items-center justify-center"
+        onClick={onOpenSettings}
+        className="settings-button p-1.5 rounded-md transition-colors hover:bg-[var(--bg-hover)] active:bg-[var(--bg-pressed)] min-w-[44px] min-h-[44px] flex items-center justify-center"
         aria-label="设置"
       >
         <Settings size={18} strokeWidth={1.5} style={{ color: "var(--text-secondary)" }} />

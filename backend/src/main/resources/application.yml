@@ -3,6 +3,17 @@ server:
 
 app:
   data-dir: ${user.home}/.ai-publisher
+  articles-dir: ${user.home}/wiki/AI Writer
+  ai:
+    skills:
+      enabled: true
+      path: ../.agents/skills
+    gemini-web:
+      script: ../.agents/skills/baoyu-danger-gemini-web/scripts/main.ts
+      data-dir: ${app.data-dir}/gemini-web
+      chrome-path: /Applications/Google Chrome 2.app/Contents/MacOS/Google Chrome
+      chrome-profile-dir: /Users/fengfan/Library/Application Support/Google/Chrome
+      consent-accepted: true
 
 spring:
   datasource:

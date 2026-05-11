@@ -3,7 +3,6 @@ package com.aiwriter.controller;
 import com.aiwriter.model.ApiResponse;
 import com.aiwriter.model.FileInfo;
 import com.aiwriter.service.FileService;
-import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -14,10 +13,13 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1/files")
-@RequiredArgsConstructor
 public class FileController {
 
     private final FileService fileService;
+
+    public FileController(FileService fileService) {
+        this.fileService = fileService;
+    }
 
     @GetMapping
     public ApiResponse<List<FileInfo>> list() throws Exception {
@@ -64,6 +66,9 @@ public class FileController {
         } catch (FileAlreadyExistsException e) {
             return ResponseEntity.status(HttpStatus.CONFLICT)
                     .body(ApiResponse.error(409, "File already exists"));
+        } catch (SecurityException e) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(ApiResponse.error(403, "Access denied"));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(ApiResponse.error(500, e.getMessage()));
@@ -75,6 +80,9 @@ public class FileController {
         try {
             fileService.deleteFile(path);
             return ResponseEntity.ok(ApiResponse.ok());
+        } catch (SecurityException e) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(ApiResponse.error(403, "Access denied"));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                     .body(ApiResponse.error(404, "File not found: " + path));
@@ -91,6 +99,9 @@ public class FileController {
         } catch (FileAlreadyExistsException e) {
             return ResponseEntity.status(HttpStatus.CONFLICT)
                     .body(ApiResponse.error(409, "A file with that name already exists"));
+        } catch (SecurityException e) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(ApiResponse.error(403, "Access denied"));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                     .body(ApiResponse.error(404, "File not found"));

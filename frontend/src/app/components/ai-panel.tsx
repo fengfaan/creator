@@ -1,88 +1,143 @@
-import { Sparkles, FileText, Expand, Wand2, ArrowRight, Languages, X, Loader2 } from "lucide-react";
+import { Sparkles, FileText, Wand2, ArrowRight, X, Loader2, Image as ImageIcon, RectangleHorizontal, RectangleVertical, ScrollText } from "lucide-react";
 import { useState } from "react";
+import { api, type AiGenerateRequest, type AiImageRequest, type AiImageResponse } from "../api";
 
 interface AIAction {
-  id: string;
+  id: AiGenerateRequest["action"] | "image-hero" | "image-inline" | "image-cover";
+  kind: "text" | "image";
+  purpose?: AiImageRequest["purpose"];
   icon: React.ReactNode;
   label: string;
   desc: string;
-  generate: (ctx: string) => string;
 }
 
 const ACTIONS: AIAction[] = [
   {
     id: "outline",
+    kind: "text",
     icon: <FileText size={15} strokeWidth={1.5} />,
     label: "生成大纲",
-    desc: "根据主题生成文章结构",
-    generate: () =>
-      `\n## 文章大纲\n\n1. **引言** — 抛出核心问题\n2. **现状分析** — 列举常见痛点\n3. **方法论** — 三步解决方案\n4. **案例展示** — 真实场景验证\n5. **总结升华** — 引导读者行动\n`,
+    desc: "保存到独立大纲栏目",
   },
   {
-    id: "expand",
-    icon: <Expand size={15} strokeWidth={1.5} />,
-    label: "扩写段落",
-    desc: "扩展当前段落内容",
-    generate: () =>
-      `\n更进一步说，这个观点之所以重要，是因为它直接影响了内容的传播效率。在算法推荐的逻辑下，**前 3 秒**决定了用户是否会停留，而停留时长又反过来决定了流量分发的范围。因此，每一句话都应当为下一句话服务。\n`,
+    id: "draft",
+    kind: "text",
+    icon: <ScrollText size={15} strokeWidth={1.5} />,
+    label: "生成正文",
+    desc: "基于大纲扩写完整正文",
   },
   {
     id: "polish",
+    kind: "text",
     icon: <Wand2 size={15} strokeWidth={1.5} />,
-    label: "小红书润色",
-    desc: "改写为小红书风格",
-    generate: () =>
-      `\n姐妹们！！！这个真的太香了 💗\n\n我跟你们说，自从用了这套方法后，我的笔记数据直接起飞 🚀\n\n✨ 重点划下来：\n· 选题要戳痛点\n· 标题要有数字\n· 封面一定要卷\n\n不点赞收藏血亏！#小红书运营\n`,
+    label: "润色",
+    desc: "优化表达和行文节奏",
   },
   {
     id: "continue",
+    kind: "text",
     icon: <ArrowRight size={15} strokeWidth={1.5} />,
     label: "AI 续写",
     desc: "续写下一段内容",
-    generate: () =>
-      `\n基于以上分析，我们可以得出一个更深层的结论：内容创作的本质，是把抽象的认知转化为具象的体验。读者感受到的不是文字本身，而是文字背后那个真实的「人」。这也是为什么个人 IP 在算法时代依然不可替代。\n`,
   },
   {
-    id: "translate",
-    icon: <Languages size={15} strokeWidth={1.5} />,
-    label: "翻译为英文",
-    desc: "翻译当前内容",
-    generate: () =>
-      `\n## English Translation\n\nWriting a viral note isn't magic — it's a method. A great topic must trigger emotion, target a clear audience, and align with the platform's tone. Pair that with a sharp headline formula (pain point + numbers + solution), and you've got the foundation of a hit.\n`,
+    id: "image-hero",
+    kind: "image",
+    purpose: "hero",
+    icon: <RectangleHorizontal size={15} strokeWidth={1.5} />,
+    label: "生成首图",
+    desc: "横版首图，适合文章开头",
+  },
+  {
+    id: "image-inline",
+    kind: "image",
+    purpose: "inline",
+    icon: <ImageIcon size={15} strokeWidth={1.5} />,
+    label: "生成配图",
+    desc: "结合正文生成段落配图",
+  },
+  {
+    id: "image-cover",
+    kind: "image",
+    purpose: "cover",
+    icon: <RectangleVertical size={15} strokeWidth={1.5} />,
+    label: "生成封面",
+    desc: "竖版封面，适合小红书",
   },
 ];
 
 interface Props {
+  title: string;
+  outline: string;
+  content: string;
   onInsert: (text: string) => void;
+  onSaveOutline: (text: string) => void;
+  onReplace: (text: string) => void;
   onClose: () => void;
 }
 
-export function AIPanel({ onInsert, onClose }: Props) {
+export function AIPanel({ title, outline, content, onInsert, onSaveOutline, onReplace, onClose }: Props) {
   const [running, setRunning] = useState<string | null>(null);
   const [streamed, setStreamed] = useState<string>("");
+  const [image, setImage] = useState<AiImageResponse | null>(null);
   const [activeAction, setActiveAction] = useState<AIAction | null>(null);
+  const [error, setError] = useState("");
+  const [model, setModel] = useState("");
 
   const runAction = async (action: AIAction) => {
     setRunning(action.id);
     setActiveAction(action);
     setStreamed("");
-    const full = action.generate("");
-    for (let i = 0; i < full.length; i++) {
-      await new Promise((r) => setTimeout(r, 12));
-      setStreamed((s) => s + full[i]);
+    setImage(null);
+    setError("");
+    try {
+      if (action.kind === "image") {
+        const result = await api.ai.generateImage({
+          purpose: action.purpose || "inline",
+          title,
+          content,
+        });
+        setImage(result);
+        setStreamed(result.markdown);
+        setModel(result.model);
+      } else {
+        const result = await api.ai.generate({
+          action: action.id,
+          title,
+          outline,
+          content,
+        });
+        setStreamed(result.text);
+        setModel(result.model);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "AI 生成失败");
+    } finally {
+      setRunning(null);
     }
-    setRunning(null);
   };
 
   const accept = () => {
-    if (streamed) onInsert(streamed);
+    if (streamed && !error) {
+      if (activeAction?.id === "outline") {
+        onSaveOutline(streamed);
+      } else if (activeAction?.id === "polish" || activeAction?.id === "draft") {
+        onReplace(streamed);
+      } else {
+        onInsert(streamed);
+      }
+    }
     setActiveAction(null);
     setStreamed("");
+    setImage(null);
+    setError("");
   };
 
   const reset = () => {
     setActiveAction(null);
     setStreamed("");
+    setImage(null);
+    setError("");
     setRunning(null);
   };
 
@@ -106,7 +161,7 @@ export function AIPanel({ onInsert, onClose }: Props) {
         <div className="flex items-center gap-2">
           <Sparkles size={16} strokeWidth={1.5} style={{ color: "var(--accent-ai)" }} />
           <span style={{ fontSize: 13, fontWeight: 600, color: "var(--accent-ai)" }}>
-            AI 操作 · DeepSeek-V3
+            AI 助写{model ? ` · ${model}` : ""}
           </span>
         </div>
         <button onClick={onClose} className="p-1 rounded hover:bg-white/50">
@@ -147,7 +202,12 @@ export function AIPanel({ onInsert, onClose }: Props) {
             >
               {activeAction.icon}
             </div>
-            <span style={{ fontSize: 13, fontWeight: 500 }}>{activeAction.label}</span>
+            <span className="min-w-0 flex-1">
+              <span style={{ display: "block", fontSize: 13, fontWeight: 600 }}>{resultTitle(activeAction)}</span>
+              <span style={{ display: "block", fontSize: 11, color: "var(--text-secondary)" }}>
+                {resultHint(activeAction)}
+              </span>
+            </span>
             {running && <Loader2 size={12} className="animate-spin" style={{ color: "var(--accent-ai)" }} />}
           </div>
 
@@ -155,15 +215,50 @@ export function AIPanel({ onInsert, onClose }: Props) {
             className="flex-1 overflow-y-auto p-4"
             style={{
               background: "var(--bg-deepest)",
-              fontFamily: "var(--font-mono)",
+              fontFamily: image ? "inherit" : "var(--font-mono)",
               fontSize: 13,
               lineHeight: 1.7,
               color: "var(--text-primary)",
-              whiteSpace: "pre-wrap",
+              whiteSpace: image ? "normal" : "pre-wrap",
               minHeight: 180,
             }}
           >
-            {streamed}
+            {error ? (
+              <span style={{ color: "var(--status-error)" }}>{error}</span>
+            ) : image ? (
+              <div className="space-y-3">
+                <div
+                  className="overflow-hidden"
+                  style={{
+                    border: "1px solid var(--border-subtle)",
+                    background: "var(--bg-surface)",
+                    borderRadius: 8,
+                  }}
+                >
+                  <img src={image.url} alt={image.alt} className="w-full object-cover" />
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>{image.alt}</div>
+                {image.caption && (
+                  <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6 }}>
+                    {image.caption}
+                  </div>
+                )}
+                <div
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 11,
+                    color: "var(--text-muted)",
+                    wordBreak: "break-all",
+                  }}
+                >
+                  {image.assetPath}
+                  <br />
+                  本机路径：{image.filePath}
+                </div>
+              </div>
+            ) : (
+              <TextResult action={activeAction} text={streamed || (running ? "正在生成..." : "")} />
+            )}
             {running && <span className="ai-caret" />}
           </div>
 
@@ -191,22 +286,111 @@ export function AIPanel({ onInsert, onClose }: Props) {
             </button>
             <button
               onClick={accept}
-              disabled={!!running || !streamed}
+              disabled={!!running || !streamed || !!error}
               className="h-8 px-3.5 rounded-md transition-all"
               style={{
                 background: "var(--accent-ai)",
                 color: "#fff",
                 fontSize: 12,
                 fontWeight: 500,
-                opacity: running || !streamed ? 0.5 : 1,
-                cursor: running || !streamed ? "not-allowed" : "pointer",
+                opacity: running || !streamed || error ? 0.5 : 1,
+                cursor: running || !streamed || error ? "not-allowed" : "pointer",
               }}
             >
-              插入到编辑器
+              {acceptLabel(activeAction)}
             </button>
           </div>
         </>
       )}
     </div>
   );
+}
+
+function TextResult({ action, text }: { action: AIAction; text: string }) {
+  if (!text) return null;
+  const isPolish = action.id === "polish";
+  const isDraft = action.id === "draft";
+  return (
+    <div>
+      {(isPolish || isDraft) && (
+        <div
+          className="mb-3 rounded-md px-3 py-2"
+          style={{
+            fontFamily: "var(--font-sans)",
+            fontSize: 12,
+            lineHeight: 1.6,
+            color: "var(--text-secondary)",
+            background: "var(--bg-surface)",
+            border: "1px solid var(--border-subtle)",
+          }}
+        >
+          {isDraft ? "这是基于大纲扩写的完整正文，确认后会替换当前编辑区内容。" : "这是优化后的完整正文，确认后会替换当前编辑区内容。"}
+        </div>
+      )}
+      <div
+        className={action.id === "outline" ? "rounded-md px-3 py-2" : ""}
+        style={{
+          whiteSpace: "pre-wrap",
+          background: action.id === "outline" ? "var(--bg-surface)" : "transparent",
+          border: action.id === "outline" ? "1px solid var(--border-subtle)" : "none",
+          borderLeft: action.id === "outline" ? "3px solid var(--accent-ai)" : undefined,
+        }}
+      >
+        {text}
+      </div>
+    </div>
+  );
+}
+
+function resultTitle(action: AIAction) {
+  switch (action.id) {
+    case "outline":
+      return "大纲草稿";
+    case "draft":
+      return "基于大纲的正文";
+    case "polish":
+      return "优化后正文";
+    case "continue":
+      return "续写片段";
+    case "image-hero":
+      return "首图预览";
+    case "image-cover":
+      return "封面预览";
+    default:
+      return "配图预览";
+  }
+}
+
+function resultHint(action: AIAction) {
+  switch (action.id) {
+    case "outline":
+      return "确认后保存到大纲栏目，正文不会被改动";
+    case "draft":
+      return "依据大纲扩写，确认后替换当前正文";
+    case "polish":
+      return "用于替换当前正文，不会追加到末尾";
+    case "continue":
+      return "用于衔接下文，确认后插入到光标位置";
+    case "image-hero":
+      return "确认后插入横版首图 Markdown";
+    case "image-cover":
+      return "确认后插入竖版封面 Markdown";
+    default:
+      return "确认后插入配图 Markdown";
+  }
+}
+
+function acceptLabel(action: AIAction) {
+  switch (action.id) {
+    case "outline":
+      return "保存大纲";
+    case "draft":
+      return "替换正文";
+    case "polish":
+      return "替换正文";
+    case "continue":
+      return "插入续写";
+    default:
+      return "插入图片";
+  }
 }

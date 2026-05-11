@@ -15,6 +15,8 @@
     <name>AI Publisher</name>
     <properties>
         <java.version>21</java.version>
+        <langchain4j.version>1.14.1</langchain4j.version>
+        <langchain4j-skills.version>1.14.0-beta24</langchain4j-skills.version>
     </properties>
     <dependencies>
         <dependency>
@@ -31,6 +33,26 @@
             <version>3.47.2.0</version>
         </dependency>
         <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j</artifactId>
+            <version>${langchain4j.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-open-ai</artifactId>
+            <version>${langchain4j.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-anthropic</artifactId>
+            <version>${langchain4j.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-skills</artifactId>
+            <version>${langchain4j-skills.version}</version>
+        </dependency>
+        <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
             <optional>true</optional>
@@ -44,7 +66,6 @@
             <groupId>com.microsoft.playwright</groupId>
             <artifactId>playwright</artifactId>
             <version>1.49.0</version>
-            <scope>test</scope>
         </dependency>
     </dependencies>
     <build>
@@ -82,7 +103,7 @@
                                 <argument>--with-deps</argument>
                                 <argument>chromium</argument>
                             </arguments>
-                            <classpathScope>test</classpathScope>
+                            <classpathScope>compile</classpathScope>
                         </configuration>
                     </execution>
                 </executions>

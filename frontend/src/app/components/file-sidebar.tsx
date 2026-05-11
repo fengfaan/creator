@@ -1,5 +1,5 @@
-import { Search, Plus, FileText, Folder, FolderOpen, ChevronRight, ChevronDown } from "lucide-react";
-import { useState, useEffect, useCallback } from "react";
+import { Search, Plus, FileText, Folder, FolderOpen, ChevronRight, ChevronDown, X } from "lucide-react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { api, FileNode } from "../api";
 
 interface Props {
@@ -12,6 +12,11 @@ export function FileSidebar({ activeId, activePath, onSelect }: Props) {
   const [query, setQuery] = useState("");
   const [tree, setTree] = useState<FileNode[]>([]);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({ root: true });
+  const [createOpen, setCreateOpen] = useState(false);
+  const [draftName, setDraftName] = useState("");
+  const [createError, setCreateError] = useState("");
+  const [creating, setCreating] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const loadTree = useCallback(async () => {
     try {
@@ -24,16 +29,40 @@ export function FileSidebar({ activeId, activePath, onSelect }: Props) {
 
   useEffect(() => { loadTree(); }, [loadTree]);
 
-  const handleCreate = async () => {
-    const name = prompt("输入文件名（例如：新文章.md）");
-    if (!name) return;
+  useEffect(() => {
+    if (!createOpen) return;
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, [createOpen]);
+
+  const closeCreateDialog = () => {
+    if (creating) return;
+    setCreateOpen(false);
+    setDraftName("");
+    setCreateError("");
+  };
+
+  const handleCreate = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    const rawName = draftName.trim();
+    if (!rawName) {
+      setCreateError("请输入文件名");
+      return;
+    }
+    const name = rawName.endsWith(".md") ? rawName : `${rawName}.md`;
+    setCreating(true);
+    setCreateError("");
     try {
       const path = await api.files.create(name);
       await loadTree();
       const id = path.replace(/[^a-zA-Z0-9]/g, "_");
       onSelect(id, name, path);
+      setCreateOpen(false);
+      setDraftName("");
     } catch (e) {
       console.error("Failed to create file:", e);
+      setCreateError("创建失败，请稍后重试");
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -126,7 +155,7 @@ export function FileSidebar({ activeId, activePath, onSelect }: Props) {
           />
         </label>
         <button
-          onClick={handleCreate}
+          onClick={() => setCreateOpen(true)}
           className="flex items-center justify-center w-full h-9 gap-1.5 rounded-md transition-colors hover:opacity-90 active:scale-[0.98]"
           style={{
             background: "var(--accent-primary-light)",
@@ -143,6 +172,105 @@ export function FileSidebar({ activeId, activePath, onSelect }: Props) {
       <div className="flex-1 overflow-y-auto px-2 pb-4">
         {tree.map((n) => renderNode(n, 0))}
       </div>
+
+      {createOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.38)" }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="create-file-title"
+          onClick={closeCreateDialog}
+        >
+          <form
+            onSubmit={handleCreate}
+            onClick={(e) => e.stopPropagation()}
+            className="w-full rounded-lg overflow-hidden"
+            style={{
+              maxWidth: 360,
+              background: "var(--bg-elevated)",
+              border: "1px solid var(--border-default)",
+              boxShadow: "0 18px 48px rgba(0,0,0,0.18)",
+            }}
+          >
+            <div
+              className="flex items-center justify-between h-11 px-4"
+              style={{ borderBottom: "1px solid var(--border-subtle)" }}
+            >
+              <div className="flex items-center gap-2">
+                <FileText size={15} strokeWidth={1.5} style={{ color: "var(--accent-primary)" }} />
+                <span id="create-file-title" style={{ fontSize: 14, fontWeight: 600 }}>
+                  新建文档
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={closeCreateDialog}
+                aria-label="关闭"
+                className="p-1.5 rounded-md hover:bg-[var(--bg-hover)] min-w-[36px] min-h-[36px] flex items-center justify-center"
+              >
+                <X size={15} strokeWidth={1.5} style={{ color: "var(--text-secondary)" }} />
+              </button>
+            </div>
+
+            <div className="p-4">
+              <label htmlFor="new-file-name" style={{ display: "block", fontSize: 12, color: "var(--text-secondary)", marginBottom: 6 }}>
+                文件名
+              </label>
+              <input
+                ref={inputRef}
+                id="new-file-name"
+                value={draftName}
+                onChange={(e) => {
+                  setDraftName(e.target.value);
+                  if (createError) setCreateError("");
+                }}
+                placeholder="例如：新文章.md"
+                className="w-full h-10 px-3 rounded-md bg-transparent"
+                style={{
+                  border: "1px solid var(--border-default)",
+                  color: "var(--text-primary)",
+                  fontSize: 13,
+                }}
+              />
+              {createError && (
+                <div style={{ marginTop: 8, color: "var(--status-error)", fontSize: 12 }}>
+                  {createError}
+                </div>
+              )}
+            </div>
+
+            <div
+              className="flex items-center justify-end gap-2 px-4 py-3"
+              style={{ borderTop: "1px solid var(--border-subtle)", background: "var(--bg-deepest)" }}
+            >
+              <button
+                type="button"
+                onClick={closeCreateDialog}
+                disabled={creating}
+                className="h-9 px-3 rounded-md hover:bg-[var(--bg-hover)]"
+                style={{ color: "var(--text-secondary)", fontSize: 13, opacity: creating ? 0.5 : 1 }}
+              >
+                取消
+              </button>
+              <button
+                type="submit"
+                disabled={creating}
+                className="h-9 px-3.5 rounded-md"
+                style={{
+                  background: "var(--accent-primary)",
+                  color: "#fff",
+                  fontSize: 13,
+                  fontWeight: 500,
+                  opacity: creating ? 0.7 : 1,
+                }}
+              >
+                {creating ? "创建中..." : "创建"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }

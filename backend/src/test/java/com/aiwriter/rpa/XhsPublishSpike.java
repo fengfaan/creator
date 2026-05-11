@@ -1,6 +1,7 @@
 package com.aiwriter.rpa;
 
 import com.microsoft.playwright.*;
+import com.microsoft.playwright.ElementHandle;
 import com.microsoft.playwright.options.LoadState;
 import org.junit.jupiter.api.*;
 
@@ -18,7 +19,6 @@ import static org.junit.jupiter.api.Assertions.*;
  * - Run `mvn generate-test-resources` first to download Chromium
  * - Have a phone with XHS app for QR code scanning
  */
-@Disabled("Manual spike — run individually")
 class XhsPublishSpike {
 
     private static final String PUBLISH_URL = "https://creator.xiaohongshu.com/publish/publish";
@@ -49,6 +49,8 @@ class XhsPublishSpike {
         printAssessment();
     }
 
+    private boolean hadSessionFile;
+
     @Test
     void fullPublishFlow() {
         long start;
@@ -56,22 +58,32 @@ class XhsPublishSpike {
         // ── Step 1: Session & Login ──
         start = System.currentTimeMillis();
         try {
+            hadSessionFile = Files.exists(SESSION_FILE);
             createOrRestoreSession();
             page = context.newPage();
 
-            boolean loggedIn = isLoggedIn();
-            if (!loggedIn) {
-                System.out.println("[Login] Session expired or first run. Waiting for re-login...");
-                if (Files.exists(SESSION_FILE)) {
-                    Files.delete(SESSION_FILE);
-                    System.out.println("[Login] Deleted expired session file.");
-                }
+            if (!hadSessionFile) {
+                // No session file — go directly to login page and wait for QR scan
+                System.out.println("[Login] First run, navigating to publish page...");
+                page.navigate(PUBLISH_URL);
+                waitForPageSettle();
                 waitForLoginAndSave();
                 page.navigate(PUBLISH_URL);
-                page.waitForLoadState(LoadState.NETWORKIDLE);
+                waitForPageSettle();
             } else {
-                System.out.println("[Login] Session valid, already on publish page.");
-                context.storageState(new BrowserContext.StorageStateOptions().setPath(SESSION_FILE));
+                // Had session — check if still valid (wait for SPA to settle)
+                page.navigate(PUBLISH_URL);
+                waitForPageSettle();
+                if (isOnLoginPage()) {
+                    System.out.println("[Login] Session expired (SPA redirected to login). Waiting for re-login...");
+                    Files.deleteIfExists(SESSION_FILE);
+                    waitForLoginAndSave();
+                    page.navigate(PUBLISH_URL);
+                    waitForPageSettle();
+                } else {
+                    System.out.println("[Login] Session valid, on publish page.");
+                    context.storageState(new BrowserContext.StorageStateOptions().setPath(SESSION_FILE));
+                }
             }
             record("Login & Session", true, "URL check", System.currentTimeMillis() - start, null);
         } catch (Exception e) {
@@ -83,6 +95,9 @@ class XhsPublishSpike {
         // ── Step 2: Upload Image ──
         uploadImage();
 
+        // ── Debug: dump page DOM structure ──
+        debugPageStructure();
+
         // ── Step 3: Fill Title ──
         fillTitle("[TEST] RPA Spike 验证标题");
 
@@ -91,6 +106,38 @@ class XhsPublishSpike {
 
         // ── Step 5: Click Publish ──
         clickPublish();
+    }
+
+    // ── Debug ─────────────────────────────────────────────────
+
+    private void debugPageStructure() {
+        System.out.println("\n[Debug] Page URL: " + page.url());
+        System.out.println("[Debug] Page title: " + page.title());
+
+        // Dump ALL visible elements that have text or are interactive
+        var allElements = (List<Object>) page.evaluate("() => {" +
+                "  const results = [];" +
+                "  const els = document.querySelectorAll('input, button, textarea, [contenteditable], [role], [class*=\"title\"], [class*=\"editor\"], [class*=\"upload\"], [class*=\"image\"], [class*=\"next\"], [class*=\"publish\"], [class*=\"draft\"]');" +
+                "  for (const el of els) {" +
+                "    results.push({" +
+                "      tag: el.tagName," +
+                "      class: el.className," +
+                "      id: el.id," +
+                "      type: el.type || ''," +
+                "      placeholder: el.placeholder || ''," +
+                "      role: el.getAttribute('role') || ''," +
+                "      text: (el.innerText || '').substring(0, 50)," +
+                "      visible: el.offsetParent !== null || el.offsetWidth > 0" +
+                "    });" +
+                "  }" +
+                "  return results;" +
+                "}");
+        System.out.println("[Debug] All interesting elements (" + allElements.size() + "):");
+        for (var el : allElements) {
+            System.out.println("  " + el);
+        }
+
+        System.out.println();
     }
 
     // ── Session Management ──────────────────────────────────────
@@ -113,11 +160,24 @@ class XhsPublishSpike {
         return context;
     }
 
-    private boolean isLoggedIn() {
-        page.navigate(PUBLISH_URL);
-        page.waitForLoadState(LoadState.NETWORKIDLE);
+    private void waitForPageSettle() {
+        // Wait for initial load
+        page.waitForLoadState(LoadState.DOMCONTENTLOADED);
+        // Wait for SPA to finish rendering (network idle after initial load)
+        try {
+            page.waitForLoadState(LoadState.NETWORKIDLE, new Page.WaitForLoadStateOptions().setTimeout(10_000));
+        } catch (Exception e) {
+            // NETWORKIDLE may timeout on pages with persistent connections — that's OK
+            System.out.println("[Page] NETWORKIDLE timeout (expected for SPA), continuing...");
+        }
+        // Extra settle time for SPA JavaScript to execute
+        page.waitForTimeout(2000);
+    }
+
+    private boolean isOnLoginPage() {
         String currentUrl = page.url();
-        return !currentUrl.contains("/login");
+        System.out.println("[Page] Current URL: " + currentUrl);
+        return currentUrl.contains("/login");
     }
 
     private void waitForLoginAndSave() {
@@ -139,8 +199,11 @@ class XhsPublishSpike {
         long start = System.currentTimeMillis();
         String selector = "input[type='file']";
         try {
-            Locator fileInput = page.locator(selector);
-            fileInput.waitFor(new Locator.WaitForOptions().setTimeout(10_000));
+            // XHS file input is hidden — don't wait for visibility
+            ElementHandle fileInput = page.querySelector(selector);
+            if (fileInput == null) {
+                throw new RuntimeException("No file input found on page");
+            }
 
             Path coverPath = Paths.get("src/test/resources/spike-cover.jpg")
                     .toAbsolutePath();
@@ -149,7 +212,8 @@ class XhsPublishSpike {
             }
 
             fileInput.setInputFiles(coverPath);
-            page.waitForTimeout(3000);
+            // Wait for upload to process and thumbnail to appear
+            page.waitForTimeout(5000);
             record("Upload Image", true, selector, System.currentTimeMillis() - start, null);
         } catch (Exception e) {
             record("Upload Image", false, selector, System.currentTimeMillis() - start, e.getMessage());

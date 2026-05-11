@@ -1,5 +1,6 @@
 import { ChevronUp, ChevronDown, Terminal, Send, Loader2, Check } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { api, type RpaLogEntry } from "../api";
 
 type Status = "idle" | "running" | "success" | "error";
 
@@ -16,41 +17,188 @@ const LEVEL_COLOR: Record<LogLine["level"], string> = {
   "--": "#38BDF8",
 };
 
-export function DistributionConsole() {
+interface Props {
+  title: string;
+  content: string;
+}
+
+export function DistributionConsole({ title, content }: Props) {
   const [expanded, setExpanded] = useState(true);
+  const [coverPath, setCoverPath] = useState("");
+  const [currentJobId, setCurrentJobId] = useState("");
+  const [waitingConfirm, setWaitingConfirm] = useState(false);
   const [logs, setLogs] = useState<LogLine[]>([
     { time: "12:00:00", level: "--", text: "等待发布指令..." },
   ]);
   const [wechatStatus, setWechatStatus] = useState<Status>("idle");
   const [xhsStatus, setXhsStatus] = useState<Status>("idle");
   const logRef = useRef<HTMLDivElement>(null);
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [logs]);
 
+  useEffect(() => () => {
+    if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+  }, []);
+
   const now = () => new Date().toTimeString().slice(0, 8);
 
-  const runPublish = async (
-    platform: "wechat" | "xhs",
-    setStatus: (s: Status) => void,
-  ) => {
-    setStatus("running");
-    const name = platform === "wechat" ? "微信公众号" : "小红书";
-    const steps: LogLine[] = [
-      { time: now(), level: "OK", text: `正在连接 Chrome 浏览器...` },
-      { time: now(), level: "OK", text: `已登录 ${name} 账号` },
-      { time: now(), level: "OK", text: "正在上传封面图 (1/3)..." },
-      { time: now(), level: "..", text: "图片压缩中, 请稍候" },
-      { time: now(), level: "OK", text: "正在填写正文..." },
-      { time: now(), level: "OK", text: `已发布到 ${name}!` },
-    ];
-    for (const s of steps) {
-      await new Promise((r) => setTimeout(r, 600));
-      setLogs((l) => [...l, { ...s, time: now() }]);
+  const appendLog = (line: LogLine) => setLogs((l) => [...l, line]);
+
+  const appendRpaLogs = (items: RpaLogEntry[]) => {
+    if (!items.length) return;
+    setLogs((l) => [
+      ...l,
+      ...items.map((item) => ({
+        time: item.time || now(),
+        level: mapBackendLevel(item.level),
+        text: item.message,
+      })),
+    ]);
+  };
+
+  const runWechat = () => {
+    setExpanded(true);
+    appendLog({ time: now(), level: "..", text: "MVP-3 先接小红书，公众号 RPA 暂不执行" });
+    setWechatStatus("error");
+    setTimeout(() => setWechatStatus("idle"), 1800);
+  };
+
+  const runXhs = async () => {
+    setExpanded(true);
+    if (!title.trim() || !content.trim()) {
+      appendLog({ time: now(), level: "!!", text: "标题和正文不能为空" });
+      setXhsStatus("error");
+      setTimeout(() => setXhsStatus("idle"), 1800);
+      return;
     }
-    setStatus("success");
-    setTimeout(() => setStatus("idle"), 2500);
+    if (!coverPath.trim()) {
+      appendLog({ time: now(), level: "!!", text: "小红书图文发布需要填写本机封面图路径" });
+      setXhsStatus("error");
+      setTimeout(() => setXhsStatus("idle"), 1800);
+      return;
+    }
+
+    setXhsStatus("running");
+    setWaitingConfirm(false);
+    setCurrentJobId("");
+    appendLog({ time: now(), level: "--", text: "正在创建小红书 RPA 任务..." });
+    try {
+      const job = await api.rpa.start({
+        platform: "xhs",
+        title: title.trim(),
+        content,
+        coverPath: coverPath.trim(),
+      });
+      setCurrentJobId(job.jobId);
+      let lastSeq = 0;
+
+      const poll = async () => {
+        try {
+          const newLogs = await api.rpa.logs(job.jobId, lastSeq);
+          if (newLogs.length) {
+            lastSeq = newLogs[newLogs.length - 1].sequence;
+            appendRpaLogs(newLogs);
+          }
+          const current = await api.rpa.get(job.jobId);
+          if (current.status === "FAILED") {
+            setXhsStatus("error");
+            setWaitingConfirm(false);
+            appendLog({ time: now(), level: "!!", text: current.message || "RPA 执行失败" });
+            setTimeout(() => setXhsStatus("idle"), 2500);
+            return;
+          }
+          if (current.status === "WAITING_CONFIRMATION") {
+            setXhsStatus("success");
+            setWaitingConfirm(true);
+            appendLog({ time: now(), level: "..", text: "请检查浏览器页面，确认无误后点击确认发布" });
+            return;
+          }
+          if (current.status === "PUBLISHED") {
+            setXhsStatus("success");
+            setWaitingConfirm(false);
+            setTimeout(() => setXhsStatus("idle"), 2500);
+            return;
+          }
+          pollTimerRef.current = setTimeout(poll, 1000);
+        } catch (e) {
+          setXhsStatus("error");
+          appendLog({
+            time: now(),
+            level: "!!",
+            text: e instanceof Error ? e.message : "读取 RPA 日志失败",
+          });
+          setTimeout(() => setXhsStatus("idle"), 2500);
+        }
+      };
+
+      poll();
+    } catch (e) {
+      setXhsStatus("error");
+      appendLog({
+        time: now(),
+        level: "!!",
+        text: e instanceof Error ? e.message : "RPA 任务创建失败",
+      });
+      setTimeout(() => setXhsStatus("idle"), 2500);
+    }
+  };
+
+  const confirmPublish = async () => {
+    if (!currentJobId) return;
+    setXhsStatus("running");
+    setWaitingConfirm(false);
+    appendLog({ time: now(), level: "..", text: "已人工确认，正在自动点击小红书发布按钮..." });
+    try {
+      await api.rpa.confirm(currentJobId);
+      let lastSeq = 0;
+
+      const poll = async () => {
+        try {
+          const newLogs = await api.rpa.logs(currentJobId, lastSeq);
+          if (newLogs.length) {
+            lastSeq = newLogs[newLogs.length - 1].sequence;
+            appendRpaLogs(newLogs);
+          }
+          const current = await api.rpa.get(currentJobId);
+          if (current.status === "FAILED") {
+            setXhsStatus("error");
+            appendLog({ time: now(), level: "!!", text: current.message || "自动确认发布失败" });
+            setTimeout(() => setXhsStatus("idle"), 2500);
+            return;
+          }
+          if (current.status === "PUBLISHED") {
+            setXhsStatus("success");
+            appendLog({ time: now(), level: "OK", text: "确认发布流程完成" });
+            setCurrentJobId("");
+            setTimeout(() => setXhsStatus("idle"), 2500);
+            return;
+          }
+          pollTimerRef.current = setTimeout(poll, 1000);
+        } catch (e) {
+          setXhsStatus("error");
+          appendLog({
+            time: now(),
+            level: "!!",
+            text: e instanceof Error ? e.message : "读取确认发布日志失败",
+          });
+          setTimeout(() => setXhsStatus("idle"), 2500);
+        }
+      };
+
+      poll();
+    } catch (e) {
+      setXhsStatus("error");
+      setWaitingConfirm(true);
+      appendLog({
+        time: now(),
+        level: "!!",
+        text: e instanceof Error ? e.message : "确认发布失败",
+      });
+      setTimeout(() => setXhsStatus("idle"), 2500);
+    }
   };
 
   return (
@@ -80,25 +228,49 @@ export function DistributionConsole() {
           </span>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <label className="flex items-center gap-2 min-w-0" style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+            <span className="shrink-0">封面</span>
+            <input
+              value={coverPath}
+              onChange={(e) => setCoverPath(e.target.value)}
+              placeholder="/Users/.../cover.jpg"
+              className="h-8 w-52 px-2 rounded-md outline-none"
+              style={{
+                background: "var(--bg-deepest)",
+                border: "1px solid var(--border-subtle)",
+                color: "var(--text-primary)",
+                fontSize: 12,
+              }}
+            />
+          </label>
           <PublishButton
             status={wechatStatus}
             color="var(--accent-wechat)"
             label="发布到微信公众号"
-            onClick={() => {
-              setExpanded(true);
-              runPublish("wechat", setWechatStatus);
-            }}
+            onClick={runWechat}
           />
           <PublishButton
             status={xhsStatus}
             color="var(--accent-xhs)"
             label="发布到小红书"
-            onClick={() => {
-              setExpanded(true);
-              runPublish("xhs", setXhsStatus);
-            }}
+            onClick={runXhs}
           />
+          {waitingConfirm && (
+            <button
+              onClick={confirmPublish}
+              className="flex items-center gap-1.5 h-9 px-3.5 rounded-md transition-all"
+              style={{
+                background: "var(--status-warning)",
+                color: "#fff",
+                fontSize: 13,
+                fontWeight: 600,
+              }}
+            >
+              <Check size={14} strokeWidth={2} />
+              确认发布
+            </button>
+          )}
           <button
             onClick={() => setExpanded(!expanded)}
             className="ml-1 p-1.5 rounded-md transition-colors hover:bg-[var(--bg-hover)]"
@@ -144,6 +316,13 @@ export function DistributionConsole() {
   );
 }
 
+function mapBackendLevel(level: RpaLogEntry["level"]): LogLine["level"] {
+  if (level === "SUCCESS") return "OK";
+  if (level === "ERROR") return "!!";
+  if (level === "WARN") return "..";
+  return "--";
+}
+
 function PublishButton({
   status,
   color,
@@ -180,7 +359,7 @@ function PublishButton({
       ) : (
         <Send size={14} strokeWidth={1.5} />
       )}
-      {isRunning ? "发布中..." : isSuccess ? "发布成功" : label}
+      {isRunning ? "执行中..." : isSuccess ? "待确认" : label}
     </button>
   );
 }

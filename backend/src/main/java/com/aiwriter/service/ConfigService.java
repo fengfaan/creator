@@ -1,17 +1,19 @@
 package com.aiwriter.service;
 
 import com.aiwriter.model.ConfigItem;
-import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
 
 @Service
-@RequiredArgsConstructor
 public class ConfigService {
 
     private final JdbcTemplate jdbc;
+
+    public ConfigService(JdbcTemplate jdbc) {
+        this.jdbc = jdbc;
+    }
 
     public ConfigItem get(String key) {
         List<ConfigItem> results = jdbc.query(

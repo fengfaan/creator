@@ -3,7 +3,6 @@ package com.aiwriter.controller;
 import com.aiwriter.model.ApiResponse;
 import com.aiwriter.model.ConfigItem;
 import com.aiwriter.service.ConfigService;
-import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -11,10 +10,13 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1/settings")
-@RequiredArgsConstructor
 public class ConfigController {
 
     private final ConfigService configService;
+
+    public ConfigController(ConfigService configService) {
+        this.configService = configService;
+    }
 
     @GetMapping
     public ApiResponse<List<ConfigItem>> list() {
