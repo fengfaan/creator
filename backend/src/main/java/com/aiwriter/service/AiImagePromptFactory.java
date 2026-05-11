@@ -7,26 +7,34 @@ import com.aiwriter.model.AiImageRequest;
 import com.aiwriter.model.ConfigItem;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 @Service
 public class AiImagePromptFactory {
+    private static final Logger log = LoggerFactory.getLogger(AiImagePromptFactory.class);
+
     private final ConfigService configService;
     private final AiGateway aiGateway;
     private final ObjectMapper objectMapper;
+    private final PromptLoader prompts;
 
-    public AiImagePromptFactory(ConfigService configService, AiGateway aiGateway, ObjectMapper objectMapper) {
+    public AiImagePromptFactory(ConfigService configService, AiGateway aiGateway, ObjectMapper objectMapper, PromptLoader prompts) {
         this.configService = configService;
         this.aiGateway = aiGateway;
         this.objectMapper = objectMapper;
+        this.prompts = prompts;
     }
 
     AiImageBrief buildBrief(AiImageRequest request) {
         String textApiKey = configValue("ai_api_key", "").trim();
         if (textApiKey.isBlank()) {
+            log.warn("Image brief: ai_api_key not configured, using fallback prompt for purpose={}", normalizePurpose(request));
             return fallbackBrief(request);
         }
         String baseUrl = configValue("ai_base_url", AiWritingService.DEFAULT_BASE_URL).trim();
@@ -39,18 +47,17 @@ public class AiImagePromptFactory {
                     resolvedBaseUrl,
                     resolvedModel,
                     List.of(
-                            new ChatMessage("system", """
-                                    你是中文内容产品的视觉总监。请根据文章上下文，为图片生成模型产出严格 JSON。
-                                    只输出 JSON，不要 Markdown，不要解释。图片中不要出现可读文字、logo、水印、二维码。
-                                    JSON 字段：prompt、alt、caption。
-                                    """),
+                            new ChatMessage("system", prompts.get("image/brief-system")),
                             new ChatMessage("user", briefUserPrompt(request))
                     ),
                     0.45,
                     2048
             )).text();
-            return parseBrief(text, request);
+            AiImageBrief brief = parseBrief(text, request);
+            log.info("Image brief generated successfully, prompt length={}", brief.prompt().length());
+            return brief;
         } catch (RuntimeException e) {
+            log.warn("Image brief: text AI call failed ({}), using fallback prompt", e.getMessage());
             return fallbackBrief(request);
         }
     }
@@ -75,60 +82,24 @@ public class AiImagePromptFactory {
         if ("cover".equals(normalizePurpose(request))) {
             return xhsCoverBriefUserPrompt(request);
         }
-        return """
-                图片用途：%s
-                画幅建议：%s
-
-                标题：
-                %s
-
-                正文：
-                %s
-
-                光标附近/参考内容：
-                %s
-
-                请产出适合当前内容的图片 brief。prompt 用英文或中英混合均可，但要明确主体、场景、氛围、风格、构图和避让项。
-                """.formatted(
-                purposeLabel(request),
-                imageSize(request),
-                blankAs(safeText(request == null ? null : request.getTitle()), "未命名文章"),
-                excerpt(blankAs(safeText(request == null ? null : request.getContent()), "暂无正文"), 4000),
-                blankAs(safeText(request == null ? null : request.getReferenceText()), "无")
-        );
+        String template = prompts.get("image/brief-user");
+        return PromptLoader.format(template, Map.of(
+                "purpose", purposeLabel(request),
+                "aspect", imageSize(request),
+                "title", blankAs(safeText(request == null ? null : request.getTitle()), "未命名文章"),
+                "content", excerpt(blankAs(safeText(request == null ? null : request.getContent()), "暂无正文"), 4000),
+                "referenceText", blankAs(safeText(request == null ? null : request.getReferenceText()), "无")
+        ));
     }
 
     private String xhsCoverBriefUserPrompt(AiImageRequest request) {
-        return """
-                图片用途：小红书封面，竖版 3:4，像信息卡/封面图，而不是普通插画。
-                画幅建议：%s
-
-                标题：
-                %s
-
-                正文：
-                %s
-
-                光标附近/参考内容：
-                %s
-
-                请产出严格 JSON：prompt、alt、caption。
-                prompt 必须适合 Pollinations 直接生成图片，并内化这些小红书封面规则：
-                - Portrait 3:4 cover, strong first-screen hook, sparse layout, one clear focal object.
-                - Xiaohongshu style infographic cover, clean editorial composition, rounded information-card blocks, sticker-like accents, soft shadows.
-                - Keep a safe content area, avoid important details in top-right and bottom 10%%.
-                - Use 1-2 large empty title-card shapes or abstract headline blocks, but do NOT render readable text.
-                - Prefer hand-drawn editorial illustration or polished flat illustration; no photorealistic screenshot, no UI screenshot.
-                - Use a fresh, warm, high-engagement palette with enough contrast; avoid clutter.
-                - No readable text, no Chinese characters, no logo, no watermark, no QR code.
-                - Keep prompt under 700 English words; prefer compact visual keywords over long explanation.
-                alt 用中文简短描述画面；caption 可为空或一句中文说明。
-                """.formatted(
-                imageSize(request),
-                blankAs(safeText(request == null ? null : request.getTitle()), "未命名文章"),
-                excerpt(blankAs(safeText(request == null ? null : request.getContent()), "暂无正文"), 3000),
-                blankAs(safeText(request == null ? null : request.getReferenceText()), "无")
-        );
+        String template = prompts.get("image/xhs-cover-brief-user");
+        return PromptLoader.format(template, Map.of(
+                "aspect", imageSize(request),
+                "title", blankAs(safeText(request == null ? null : request.getTitle()), "未命名文章"),
+                "content", excerpt(blankAs(safeText(request == null ? null : request.getContent()), "暂无正文"), 3000),
+                "referenceText", blankAs(safeText(request == null ? null : request.getReferenceText()), "无")
+        ));
     }
 
     private AiImageBrief parseBrief(String text, AiImageRequest request) {
@@ -139,6 +110,7 @@ public class AiImagePromptFactory {
             String alt = root.path("alt").asText("").trim();
             String caption = root.path("caption").asText("").trim();
             if (prompt.isBlank()) {
+                log.warn("Image brief: text AI returned JSON without prompt field, using fallback. Raw response: {}", text.substring(0, Math.min(text.length(), 200)));
                 return fallbackBrief(request);
             }
             return new AiImageBrief(
@@ -147,6 +119,7 @@ public class AiImagePromptFactory {
                     caption
             );
         } catch (Exception e) {
+            log.warn("Image brief: failed to parse text AI response as JSON ({}), using fallback. Raw: {}", e.getMessage(), text.substring(0, Math.min(text.length(), 200)));
             return fallbackBrief(request);
         }
     }
@@ -165,33 +138,28 @@ public class AiImagePromptFactory {
         }
         String title = blankAs(safeText(request == null ? null : request.getTitle()), "未命名文章");
         String content = excerpt(blankAs(safeText(request == null ? null : request.getContent()), "暂无正文"), 1200);
-        String prompt = """
-                Create a polished editorial image for a Chinese article.
-                Purpose: %s.
-                Article title: %s.
-                Context: %s.
-                Style: modern editorial illustration, realistic details, thoughtful composition, natural lighting, high quality.
-                Avoid readable text, logos, watermarks, QR codes, UI screenshots, clutter, distorted hands, low resolution.
-                """.formatted(purposeLabel(request), title, content);
+        String template = prompts.get("image/fallback-user");
+        String prompt = PromptLoader.format(template, Map.of(
+                "purpose", purposeLabel(request),
+                "title", title,
+                "content", content
+        ));
         return new AiImageBrief(addPromptGuardrails(prompt), "根据文章《" + title + "》生成的配图", "");
     }
 
     private AiImageBrief fallbackXhsCoverBrief(AiImageRequest request) {
         String title = blankAs(safeText(request == null ? null : request.getTitle()), "未命名文章");
         String content = excerpt(blankAs(safeText(request == null ? null : request.getContent()), "暂无正文"), 900);
-        String prompt = """
-                Xiaohongshu Little Red Book style cover image, portrait 3:4, clean infographic cover.
-                Topic: %s. Context: %s.
-                Sparse layout, one clear focal object, rounded information-card blocks, abstract headline-card shapes,
-                sticker-like accents, soft shadows, fresh warm palette, polished flat editorial illustration,
-                safe content area, no important details in top-right or bottom 10 percent.
-                No readable text, no Chinese characters, no logos, no watermarks, no QR codes, no UI screenshot.
-                """.formatted(title, content);
+        String template = prompts.get("image/fallback-xhs-cover-user");
+        String prompt = PromptLoader.format(template, Map.of(
+                "title", title,
+                "content", content
+        ));
         return new AiImageBrief(addPromptGuardrails(prompt), "根据文章《" + title + "》生成的小红书封面", "");
     }
 
     private String addPromptGuardrails(String prompt) {
-        return prompt + "\nNo readable text, no logos, no watermarks, no QR codes.";
+        return prompt + "\n" + prompts.get("image/guardrails");
     }
 
     private String normalizeTextModel(String model, String baseUrl) {

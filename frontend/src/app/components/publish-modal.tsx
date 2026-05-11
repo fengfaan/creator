@@ -9,6 +9,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { formatXhsContent, stripDuplicatedTitle } from "../formatters/xhs";
 
 type PlatformId = "wechat" | "xhs";
 type CheckLevel = "ok" | "warn" | "error";
@@ -62,9 +63,13 @@ const PLATFORMS: Platform[] = [
 ];
 
 const PLACEHOLDER_RULES: Rule[] = [
-  { label: "绝对化表达", terms: ["最强", "最佳", "第一", "唯一", "顶级", "国家级", "100%", "百分百"] },
-  { label: "医疗功效", terms: ["根治", "治愈", "药到病除", "无副作用"] },
-  { label: "承诺保证", terms: ["保证有效", "稳赚", "永久有效", "零风险"] },
+  { label: "绝对化表达", terms: ["最强", "最佳", "最好", "第一", "唯一", "顶级", "国家级", "100%", "百分百", "全国第一", "全球最佳", "独家", "绝版", "极品", "顶尖", "万能", "史上最强", "绝无仅有", "无人能及", "行业第一", "销量第一"] },
+  { label: "医疗功效", terms: ["根治", "治愈", "药到病除", "无副作用", "减肥", "祛斑", "美白", "壮阳", "抗癌", "防癌", "降血糖", "包治", "包治百病", "神效"] },
+  { label: "承诺保证", terms: ["保证有效", "稳赚", "永久有效", "零风险", "绝对有效", "包赚", "包过", "稳赚不赔"] },
+  { label: "投资理财", terms: ["推荐股票", "理财推荐", "投资回报", "内幕消息", "保本保息", "收益率"] },
+  { label: "联系方式", terms: ["微信号", "加微信", "加VX", "加QQ", "扫码加", "私聊我买", "转账", "支付宝"] },
+  { label: "外部导购", terms: ["淘宝搜索", "京东搜", "拼多多搜", "闲鱼搜", "复制口令", "领券购买"] },
+  { label: "夸张标题", terms: ["震惊", "震撼来袭", "你绝对不知道", "赶紧看", "出大事了", "千万别", "不看后悔"] },
 ];
 
 const LEVEL_STYLE: Record<CheckLevel, { color: string; bg: string; label: string }> = {
@@ -80,10 +85,12 @@ export function PublishModal({ open, onClose, title, content }: Props) {
 
   const draftTitle = title.trim() || "未命名文章";
   const normalizedContent = useMemo(() => stripDuplicatedTitle(content, draftTitle), [content, draftTitle]);
-  const charCount = useMemo(() => countChars(normalizedContent), [normalizedContent]);
+  const xhsFormatted = useMemo(() => formatXhsContent(draftTitle, normalizedContent), [draftTitle, normalizedContent]);
+  const selectedContent = selected === "xhs" ? xhsFormatted.body : normalizedContent;
+  const charCount = useMemo(() => countChars(selectedContent), [selectedContent]);
   const checks = useMemo(
-    () => buildChecks(draftTitle, normalizedContent),
-    [draftTitle, normalizedContent],
+    () => buildChecks(draftTitle, normalizedContent, xhsFormatted.body),
+    [draftTitle, normalizedContent, xhsFormatted.body],
   );
   const selectedPlatform = PLATFORMS.find((p) => p.id === selected) || PLATFORMS[0];
   const selectedChecks = checks.filter((item) => item.platform === selected);
@@ -126,7 +133,7 @@ export function PublishModal({ open, onClose, title, content }: Props) {
   const copyFor = async (platform: PlatformId) => {
     const text = platform === "wechat"
       ? buildWechatHtml(draftTitle, normalizedContent)
-      : buildXhsText(draftTitle, normalizedContent);
+      : xhsFormatted.text;
     await copyToClipboard(text);
     setCopied(platform);
     setTimeout(() => setCopied(""), 1800);
@@ -189,7 +196,7 @@ export function PublishModal({ open, onClose, title, content }: Props) {
             style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}
           >
             <Metric label="标题" value={`${countChars(draftTitle)} 字`} detail={draftTitle} />
-            <Metric label="正文" value={`${charCount} 字`} detail={`${normalizedContent.split(/\n/).filter(Boolean).length} 段`} />
+            <Metric label="正文" value={`${charCount} 字`} detail={`${selectedContent.split(/\n/).filter(Boolean).length} 段`} />
           </div>
 
           <div className="grid grid-cols-2 gap-2 mb-4" role="tablist" aria-label="发布平台">
@@ -363,16 +370,18 @@ function ActionButton({
   );
 }
 
-function buildChecks(title: string, content: string): CheckItem[] {
+function buildChecks(title: string, content: string, xhsContent: string): CheckItem[] {
   const titleLen = countChars(title);
   const bodyLen = countChars(content);
+  const xhsBodyLen = countChars(xhsContent);
   return [
     lengthCheck("wechat-title", "wechat", "标题长度", titleLen, 64),
     lengthCheck("wechat-body", "wechat", "正文长度", bodyLen, 50000),
     ...sensitiveChecks("wechat", title, content),
     lengthCheck("xhs-title", "xhs", "标题长度", titleLen, 20),
-    lengthCheck("xhs-body", "xhs", "正文长度", bodyLen, 1000),
-    ...sensitiveChecks("xhs", title, content),
+    lengthCheck("xhs-body", "xhs", "正文长度", xhsBodyLen, 1000),
+    markdownCheck(xhsContent),
+    ...sensitiveChecks("xhs", title, xhsContent),
   ];
 }
 
@@ -413,21 +422,20 @@ function sensitiveChecks(platform: PlatformId, title: string, content: string): 
   }));
 }
 
+function markdownCheck(content: string): CheckItem {
+  const hasMarkdownResidue = /(^|\n)#{1,6}\s|\*\*[^*]+\*\*|!\[[^\]]*]\([^)]+\)|\[([^\]]+)]\([^)]+\)/.test(content);
+  return {
+    id: "xhs-markdown",
+    platform: "xhs",
+    level: hasMarkdownResidue ? "warn" : "ok",
+    label: "小红书纯文本",
+    detail: hasMarkdownResidue ? "仍可能残留 Markdown 标记" : "已转换为换行/符号排版",
+  };
+}
+
 function buildWechatHtml(title: string, content: string) {
   const body = markdownToHtml(content);
   return `<section style="font-size:16px;line-height:1.8;color:#1f2937;">\n<h1 style="font-size:24px;line-height:1.35;margin:0 0 20px;font-weight:700;">${escapeHtml(title)}</h1>\n${body}\n</section>`;
-}
-
-function buildXhsText(title: string, content: string) {
-  const plain = content
-    .replace(/^#{1,6}\s+/gm, "")
-    .replace(/\*\*([^*]+)\*\*/g, "$1")
-    .replace(/\*([^*]+)\*/g, "$1")
-    .replace(/`([^`]+)`/g, "$1")
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-  return `${title}\n\n${plain}`.trim();
 }
 
 function markdownToHtml(markdown: string) {
@@ -475,11 +483,6 @@ function inlineMarkdown(text: string) {
   return escapeHtml(text)
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/`([^`]+)`/g, "<code>$1</code>");
-}
-
-function stripDuplicatedTitle(content: string, title: string) {
-  const escaped = title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return content.replace(new RegExp(`^#\\s+${escaped}\\s*\\n+`, "i"), "").trim();
 }
 
 function countChars(text: string) {

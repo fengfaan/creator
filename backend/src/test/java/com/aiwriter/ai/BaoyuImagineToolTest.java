@@ -84,6 +84,37 @@ class BaoyuImagineToolTest {
                 .containsEntry("OPENAI_IMAGE_MODEL", "gpt-image-2");
     }
 
+    @Test
+    void mapsSharedImageApiKeyToZaiApiKey() throws Exception {
+        configService.set("image_api_key", "glm-key");
+        configService.set("image_model", "glm-image");
+        Path script = tempDir.resolve("skills/baoyu-imagine/scripts/main.ts");
+        Files.createDirectories(script.getParent());
+        Files.writeString(script, "// test");
+        CapturingRunner runner = new CapturingRunner();
+        BaoyuImagineTool tool = new BaoyuImagineTool(
+                configService,
+                new ObjectMapper(),
+                script,
+                tempDir.resolve("articles"),
+                runner,
+                Duration.ofSeconds(1)
+        );
+
+        tool.generateImage(
+                "A clean editorial illustration",
+                "3:4",
+                "2k",
+                "zai",
+                "glm-image",
+                "cover"
+        );
+
+        assertThat(runner.command).contains("--provider", "zai", "--model", "glm-image");
+        assertThat(runner.environment).containsEntry("ZAI_API_KEY", "glm-key");
+    }
+
+
     private static class CapturingRunner implements BaoyuImagineTool.CommandRunner {
         List<String> command = new ArrayList<>();
         Map<String, String> environment = Map.of();

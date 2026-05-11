@@ -1,13 +1,16 @@
-import { PanelLeft, Settings, Sun, Moon, ChevronDown, Check, Send } from "lucide-react";
+import { PanelLeft, Settings, Sun, Moon, ChevronDown, Check, Send, Save, Loader2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 
 interface TopBarProps {
   fileName: string;
   model: string;
+  isDirty: boolean;
+  saveStatus: "idle" | "saving" | "saved" | "error";
   onToggleSidebar: () => void;
   isDark: boolean;
   onToggleTheme: () => void;
+  onSave: () => void;
   onPublish: () => void;
   onOpenSettings: () => void;
   onModelChange: (model: string) => void;
@@ -18,9 +21,12 @@ const MODELS = ["deepseek-chat", "deepseek-reasoner", "qwen-max"];
 export function TopBar({
   fileName,
   model,
+  isDirty,
+  saveStatus,
   onToggleSidebar,
   isDark,
   onToggleTheme,
+  onSave,
   onPublish,
   onOpenSettings,
   onModelChange,
@@ -143,6 +149,24 @@ export function TopBar({
           </div>
         )}
       </div>
+
+      <button
+        onClick={onSave}
+        disabled={!isDirty || saveStatus === "saving"}
+        aria-label="保存"
+        className="flex items-center gap-1.5 h-8 px-3 rounded-md transition-all hover:opacity-90 active:scale-[0.97]"
+        style={{
+          background: isDirty ? "var(--bg-elevated)" : "transparent",
+          color: isDirty ? "var(--text-primary)" : "var(--text-muted)",
+          border: isDirty ? "1px solid var(--border-default)" : "1px solid transparent",
+          fontSize: 13,
+          fontWeight: 500,
+          cursor: isDirty ? "pointer" : "default",
+        }}
+      >
+        {saveStatus === "saving" ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} strokeWidth={1.5} />}
+        <span className="hidden sm:inline">保存</span>
+      </button>
 
       <button
         onClick={onPublish}

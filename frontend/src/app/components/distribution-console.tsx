@@ -1,6 +1,7 @@
 import { ChevronUp, ChevronDown, Terminal, Send, Loader2, Check } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api, type RpaLogEntry } from "../api";
+import { formatXhsContent } from "../formatters/xhs";
 
 type Status = "idle" | "running" | "success" | "error";
 
@@ -20,11 +21,15 @@ const LEVEL_COLOR: Record<LogLine["level"], string> = {
 interface Props {
   title: string;
   content: string;
+  coverPath?: string;
+  onCoverPathChange?: (v: string) => void;
 }
 
-export function DistributionConsole({ title, content }: Props) {
+export function DistributionConsole({ title, content, coverPath: externalCoverPath, onCoverPathChange }: Props) {
   const [expanded, setExpanded] = useState(true);
-  const [coverPath, setCoverPath] = useState("");
+  const [internalCoverPath, setInternalCoverPath] = useState("");
+  const coverPath = externalCoverPath ?? internalCoverPath;
+  const setCoverPath = onCoverPathChange ?? setInternalCoverPath;
   const [currentJobId, setCurrentJobId] = useState("");
   const [waitingConfirm, setWaitingConfirm] = useState(false);
   const [logs, setLogs] = useState<LogLine[]>([
@@ -86,10 +91,11 @@ export function DistributionConsole({ title, content }: Props) {
     setCurrentJobId("");
     appendLog({ time: now(), level: "--", text: "正在创建小红书 RPA 任务..." });
     try {
+      const xhs = formatXhsContent(title, content);
       const job = await api.rpa.start({
         platform: "xhs",
-        title: title.trim(),
-        content,
+        title: xhs.title,
+        content: xhs.body,
         coverPath: coverPath.trim(),
       });
       setCurrentJobId(job.jobId);

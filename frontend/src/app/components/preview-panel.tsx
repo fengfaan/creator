@@ -155,11 +155,14 @@ function CheckPanel({
             {!loading && result && (
               <>
                 <div style={{ marginBottom: result.issues.length > 0 ? 8 : 0 }}>
+                  {platform === "xhs" && result.riskScore != null
+                    ? `风控评分：${result.riskScore} · ${result.riskLevel || "低风险"} · `
+                    : ""}
                   {result.aiReviewed ? `模型：${result.model || "当前模型"}` : "仅完成本地规则检查"}
                 </div>
                 {result.issues.slice(0, 6).map((issue, index) => (
                   <div key={`${issue.term}-${issue.line}-${index}`} style={{ marginTop: 4 }}>
-                    第 {issue.line} 行: "{issue.term}" · {issue.suggestion}
+                    [{issue.category}] 第 {issue.line} 行: "{issue.term}" · {issue.suggestion}
                   </div>
                 ))}
                 {result.aiReview && (
@@ -205,6 +208,9 @@ function VersionsPanel({ outline, drafts, activePlatform }: { outline: string; d
 }
 
 function WechatPreview({ title, blocks }: { title: string; blocks: Block[] }) {
+  const heroImage = blocks.find((b): b is Extract<Block, { type: "image" }> => b.type === "image");
+  const contentBlocks = heroImage ? blocks.filter((b) => b !== heroImage) : blocks;
+
   return (
     <div
       className="mx-auto rounded-md overflow-hidden"
@@ -218,6 +224,13 @@ function WechatPreview({ title, blocks }: { title: string; blocks: Block[] }) {
       <div className="px-4 py-2" style={{ background: "#F7F7F7", borderBottom: "1px solid var(--border-subtle)", fontSize: 11, color: "#888" }}>
         预览：公众号稿 v2
       </div>
+      {heroImage && (
+        <ImageWithFallback
+          src={imageSrc(heroImage.src)}
+          alt={heroImage.alt}
+          style={{ width: "100%", display: "block", aspectRatio: "16/9", objectFit: "cover" }}
+        />
+      )}
       <div className="px-6 py-6">
         <h1 style={{ fontSize: 22, fontWeight: 700, lineHeight: 1.4, color: "#222", marginBottom: 12 }}>
           {title || "未命名文章"}
@@ -228,7 +241,7 @@ function WechatPreview({ title, blocks }: { title: string; blocks: Block[] }) {
           <span>2026-05-11</span>
         </div>
         <div style={{ fontSize: 17, lineHeight: 1.85, color: "#333" }}>
-          {blocks.map((b, i) => renderBlockWechat(b, i))}
+          {contentBlocks.map((b, i) => renderBlockWechat(b, i))}
         </div>
       </div>
     </div>

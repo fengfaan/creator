@@ -4,8 +4,7 @@ import { api } from "../api";
 
 const DEFAULT_BASE_URL = "https://api.deepseek.com";
 const DEFAULT_MODEL = "deepseek-chat";
-const DEFAULT_IMAGE_BASE_URL = "https://image.pollinations.ai";
-const DEFAULT_IMAGE_MODEL = "sana";
+const DEFAULT_IMAGE_MODEL = "glm-image";
 
 interface SettingsModalProps {
   open: boolean;
@@ -18,7 +17,6 @@ export function SettingsModal({ open, onClose, onSaved }: SettingsModalProps) {
   const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE_URL);
   const [model, setModel] = useState(DEFAULT_MODEL);
   const [imageApiKey, setImageApiKey] = useState("");
-  const [imageBaseUrl, setImageBaseUrl] = useState(DEFAULT_IMAGE_BASE_URL);
   const [imageModel, setImageModel] = useState(DEFAULT_IMAGE_MODEL);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -35,15 +33,15 @@ export function SettingsModal({ open, onClose, onSaved }: SettingsModalProps) {
       api.settings.get("ai_base_url"),
       api.settings.get("selected_model"),
       api.settings.get("image_api_key"),
-      api.settings.get("image_base_url"),
+      api.settings.get("zai_api_key"),
+      api.settings.get("bigmodel_api_key"),
       api.settings.get("image_model"),
     ])
-      .then(([keyItem, baseItem, modelItem, imageKeyItem, imageBaseItem, imageModelItem]) => {
+      .then(([keyItem, baseItem, modelItem, imageKeyItem, zaiKeyItem, bigmodelKeyItem, imageModelItem]) => {
         setApiKey(keyItem?.value || "");
         setBaseUrl(baseItem?.value || DEFAULT_BASE_URL);
         setModel(modelItem?.value || DEFAULT_MODEL);
-        setImageApiKey(imageKeyItem?.value || "");
-        setImageBaseUrl(imageBaseItem?.value || DEFAULT_IMAGE_BASE_URL);
+        setImageApiKey(zaiKeyItem?.value || bigmodelKeyItem?.value || imageKeyItem?.value || "");
         setImageModel(imageModelItem?.value || DEFAULT_IMAGE_MODEL);
       })
       .catch((e) => setError(e instanceof Error ? e.message : "设置加载失败"))
@@ -58,20 +56,19 @@ export function SettingsModal({ open, onClose, onSaved }: SettingsModalProps) {
     setStatus("");
     const nextBaseUrl = baseUrl.trim() || DEFAULT_BASE_URL;
     const nextModel = model.trim() || DEFAULT_MODEL;
-    const nextImageBaseUrl = imageBaseUrl.trim() || DEFAULT_IMAGE_BASE_URL;
     const nextImageModel = imageModel.trim() || DEFAULT_IMAGE_MODEL;
     try {
       await Promise.all([
         api.settings.set("ai_api_key", apiKey.trim()),
         api.settings.set("ai_base_url", nextBaseUrl),
         api.settings.set("selected_model", nextModel),
+        api.settings.set("image_provider", "zai"),
         api.settings.set("image_api_key", imageApiKey.trim()),
-        api.settings.set("image_base_url", nextImageBaseUrl),
+        api.settings.set("zai_api_key", imageApiKey.trim()),
         api.settings.set("image_model", nextImageModel),
       ]);
       setBaseUrl(nextBaseUrl);
       setModel(nextModel);
-      setImageBaseUrl(nextImageBaseUrl);
       setImageModel(nextImageModel);
       setStatus("已保存");
       onSaved(nextModel);
@@ -150,11 +147,11 @@ export function SettingsModal({ open, onClose, onSaved }: SettingsModalProps) {
               <SectionTitle label="图片模型" />
               <Field
                 icon={<KeyRound size={15} strokeWidth={1.5} />}
-                label="图片 API Key"
+                label="GLM API Key"
                 value={imageApiKey}
                 onChange={setImageApiKey}
                 type="password"
-                placeholder="同服务时可留空复用写作 Key"
+                placeholder="ZAI / BIGMODEL API Key"
               />
               <Field
                 icon={<Cpu size={15} strokeWidth={1.5} />}
@@ -162,13 +159,6 @@ export function SettingsModal({ open, onClose, onSaved }: SettingsModalProps) {
                 value={imageModel}
                 onChange={setImageModel}
                 placeholder={DEFAULT_IMAGE_MODEL}
-              />
-              <Field
-                icon={<Link2 size={15} strokeWidth={1.5} />}
-                label="图片 Base URL"
-                value={imageBaseUrl}
-                onChange={setImageBaseUrl}
-                placeholder={DEFAULT_IMAGE_BASE_URL}
               />
             </>
           )}

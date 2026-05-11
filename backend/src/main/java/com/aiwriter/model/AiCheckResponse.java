@@ -9,6 +9,8 @@ public class AiCheckResponse {
     private String model;
     private List<AiCheckIssue> issues;
     private String aiReview;
+    private Integer riskScore;
+    private String riskLevel;
 
     public AiCheckResponse() {
     }
@@ -27,6 +29,28 @@ public class AiCheckResponse {
         this.model = model;
         this.issues = issues;
         this.aiReview = aiReview;
+        this.riskScore = null;
+        this.riskLevel = "";
+    }
+
+    public AiCheckResponse(
+            String summary,
+            String status,
+            boolean aiReviewed,
+            String model,
+            List<AiCheckIssue> issues,
+            String aiReview,
+            Integer riskScore,
+            String riskLevel
+    ) {
+        this.summary = summary;
+        this.status = status;
+        this.aiReviewed = aiReviewed;
+        this.model = model;
+        this.issues = issues;
+        this.aiReview = aiReview;
+        this.riskScore = riskScore;
+        this.riskLevel = riskLevel;
     }
 
     public String getSummary() {
@@ -75,5 +99,21 @@ public class AiCheckResponse {
 
     public void setAiReview(String aiReview) {
         this.aiReview = aiReview;
+    }
+
+    public Integer getRiskScore() {
+        return riskScore;
+    }
+
+    public void setRiskScore(Integer riskScore) {
+        this.riskScore = riskScore;
+    }
+
+    public String getRiskLevel() {
+        return riskLevel;
+    }
+
+    public void setRiskLevel(String riskLevel) {
+        this.riskLevel = riskLevel;
     }
 }

@@ -27,6 +27,8 @@ public class BaoyuImagineTool {
     private static final DateTimeFormatter FILE_TIME = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
     private static final Duration DEFAULT_TIMEOUT = Duration.ofMinutes(4);
     private static final List<String> SUPPORTED_RATIOS = List.of("1:1", "16:9", "9:16", "4:3", "3:4", "2.35:1");
+    private static final Path DEFAULT_RELATIVE_SCRIPT = Path.of(".agents/skills/baoyu-imagine/scripts/main.ts");
+    private static final Path CODEX_HOME_SCRIPT = Path.of(".codex/skills/baoyu-imagine/scripts/main.ts");
 
     private final ConfigService configService;
     private final ObjectMapper objectMapper;
@@ -45,7 +47,7 @@ public class BaoyuImagineTool {
         this(
                 configService,
                 objectMapper,
-                resolvePath(scriptPath),
+                resolveScriptPath(scriptPath),
                 resolvePath(articlesDir),
                 BaoyuImagineTool::runProcess,
                 DEFAULT_TIMEOUT
@@ -113,11 +115,12 @@ public class BaoyuImagineTool {
             }
             JsonNode root = objectMapper.readTree(result.stdout());
             String savedImage = root.path("savedImage").asText(outputPath.toString());
+            Path resolvedImage = resolveSavedImage(savedImage, outputPath);
             return objectMapper.createObjectNode()
                     .put("success", true)
-                    .put("assetPath", assetPath(Path.of(savedImage)))
-                    .put("publicUrl", publicUrl(Path.of(savedImage)))
-                    .put("absolutePath", Path.of(savedImage).toAbsolutePath().normalize().toString())
+                    .put("assetPath", assetPath(resolvedImage))
+                    .put("publicUrl", publicUrl(resolvedImage))
+                    .put("absolutePath", resolvedImage.toAbsolutePath().normalize().toString())
                     .put("provider", root.path("provider").asText(safeProvider))
                     .put("model", root.path("model").asText(safeModel))
                     .put("prompt", safePrompt)
@@ -135,7 +138,7 @@ public class BaoyuImagineTool {
         putIfPresent(env, "GOOGLE_API_KEY", firstConfig("google_api_key"));
         putIfPresent(env, "DASHSCOPE_API_KEY", firstConfig("dashscope_api_key"));
         putIfPresent(env, "OPENROUTER_API_KEY", firstConfig("openrouter_api_key"));
-        putIfPresent(env, "ZAI_API_KEY", firstConfig("zai_api_key", "bigmodel_api_key"));
+        putIfPresent(env, "ZAI_API_KEY", firstConfig("zai_api_key", "bigmodel_api_key", "image_api_key"));
         putIfPresent(env, "MINIMAX_API_KEY", firstConfig("minimax_api_key"));
         putIfPresent(env, "REPLICATE_API_TOKEN", firstConfig("replicate_api_token"));
         putIfPresent(env, "ARK_API_KEY", firstConfig("ark_api_key"));
@@ -222,8 +225,41 @@ public class BaoyuImagineTool {
         );
     }
 
+    private static Path resolveScriptPath(String value) {
+        Path configured = resolvePath(value);
+        if (Files.isRegularFile(configured)) {
+            return configured;
+        }
+        Path cwd = Path.of("").toAbsolutePath().normalize();
+        List<Path> candidates = List.of(
+                cwd.resolve(DEFAULT_RELATIVE_SCRIPT),
+                cwd.resolve("..").resolve(DEFAULT_RELATIVE_SCRIPT),
+                cwd.resolve("../..").resolve(DEFAULT_RELATIVE_SCRIPT),
+                Path.of(System.getProperty("user.home", "")).resolve(CODEX_HOME_SCRIPT)
+        );
+        for (Path candidate : candidates) {
+            Path normalized = candidate.toAbsolutePath().normalize();
+            if (Files.isRegularFile(normalized)) {
+                return normalized;
+            }
+        }
+        return configured;
+    }
+
     private static Path resolvePath(String value) {
         return Path.of(value).toAbsolutePath().normalize();
+    }
+
+    private Path resolveSavedImage(String savedImage, Path outputPath) {
+        Path path = Path.of(savedImage);
+        if (path.isAbsolute()) {
+            return path.normalize();
+        }
+        Path resolved = articlesDir.resolve(path).toAbsolutePath().normalize();
+        if (Files.exists(resolved)) {
+            return resolved;
+        }
+        return outputPath.toAbsolutePath().normalize();
     }
 
     private static void putIfPresent(Map<String, String> env, String key, String value) {

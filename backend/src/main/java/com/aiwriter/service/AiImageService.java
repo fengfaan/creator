@@ -1,122 +1,112 @@
 package com.aiwriter.service;
 
-import com.aiwriter.ai.AiGateway;
-import com.aiwriter.ai.ImageGenerationRequest;
-import com.aiwriter.ai.ImageGenerationResponse;
+import com.aiwriter.ai.BaoyuImagineTool;
 import com.aiwriter.model.AiImageRequest;
 import com.aiwriter.model.AiImageResponse;
 import com.aiwriter.model.ConfigItem;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 
-import java.io.IOException;
+import java.util.Locale;
 
 @Service
 public class AiImageService {
-    private static final String DEFAULT_IMAGE_BASE_URL = "https://image.pollinations.ai";
-    private static final String DEFAULT_IMAGE_MODEL = "sana";
+    private static final String DEFAULT_ZAI_IMAGE_MODEL = "glm-image";
 
     private final ConfigService configService;
     private final AiImagePromptFactory promptFactory;
-    private final AiGateway aiGateway;
-    private final ImageAssetService imageAssetService;
+    private final BaoyuImagineTool baoyuImagineTool;
+    private final ObjectMapper objectMapper;
 
     public AiImageService(
             ConfigService configService,
             AiImagePromptFactory promptFactory,
-            AiGateway aiGateway,
-            ImageAssetService imageAssetService
+            BaoyuImagineTool baoyuImagineTool,
+            ObjectMapper objectMapper
     ) {
         this.configService = configService;
         this.promptFactory = promptFactory;
-        this.aiGateway = aiGateway;
-        this.imageAssetService = imageAssetService;
+        this.baoyuImagineTool = baoyuImagineTool;
+        this.objectMapper = objectMapper;
     }
 
     public AiImageResponse generate(AiImageRequest request) {
         AiImageBrief brief = promptFactory.buildBrief(request);
-        GeneratedImage image = toGeneratedImage(aiGateway.generateImage(imageGenerationRequest(brief, request)));
-        return saveGeneratedImage(request, brief, image);
+        return generateWithBaoyuImagine(request, brief);
     }
 
-    private ImageGenerationRequest imageGenerationRequest(AiImageBrief brief, AiImageRequest request) {
-        String baseUrl = configValue("image_base_url", DEFAULT_IMAGE_BASE_URL).trim();
-        String model = configValue("image_model", DEFAULT_IMAGE_MODEL).trim();
-        String resolvedBaseUrl = baseUrl.isBlank() ? DEFAULT_IMAGE_BASE_URL : baseUrl;
-        String resolvedModel = model.isBlank() ? DEFAULT_IMAGE_MODEL : model;
-        String apiKey = resolveImageApiKey(resolvedBaseUrl);
-        if (!usesPollinations(resolvedBaseUrl) && apiKey.isBlank()) {
-            throw new AiWritingException(400, "请先在设置中配置图片 API Key，或把图片 Base URL 设为 image.pollinations.ai 使用免 Key 图片生成");
+    private AiImageResponse generateWithBaoyuImagine(AiImageRequest request, AiImageBrief brief) {
+        String provider = "zai";
+        String model = imageModel();
+        if (firstConfig("zai_api_key", "bigmodel_api_key", "image_api_key").isBlank()) {
+            throw new AiWritingException(400, "请先在设置中配置 GLM/Z.AI 图片 API Key");
         }
-        return new ImageGenerationRequest(
-                apiKey,
-                resolvedBaseUrl,
-                resolvedModel,
+        String result = baoyuImagineTool.generateImage(
                 brief.prompt(),
-                promptFactory.imageSize(request)
+                aspectRatio(request),
+                imageQuality(),
+                provider,
+                model,
+                promptFactory.normalizePurpose(request)
         );
-    }
-
-    private GeneratedImage toGeneratedImage(ImageGenerationResponse response) {
-        ImageFormat format = "jpg".equalsIgnoreCase(response.format()) || "jpeg".equalsIgnoreCase(response.format())
-                ? ImageFormat.JPEG
-                : ImageFormat.PNG;
-        return new GeneratedImage(response.bytes(), response.model(), format);
-    }
-
-    private AiImageResponse saveGeneratedImage(AiImageRequest request, AiImageBrief brief, GeneratedImage image) {
         try {
-            ImageAssetService.SavedImage saved = switch (image.format()) {
-                case JPEG -> imageAssetService.saveJpeg(image.bytes(), promptFactory.normalizePurpose(request));
-                case PNG -> imageAssetService.savePng(image.bytes(), promptFactory.normalizePurpose(request));
-            };
-            String markdown = "![" + brief.alt() + "](" + saved.assetPath() + ")";
+            JsonNode root = objectMapper.readTree(result);
+            if (!root.path("success").asBoolean(false)) {
+                String message = root.path("error").asText("GLM 图片生成失败");
+                throw new AiWritingException(502, message);
+            }
+            String assetPath = root.path("assetPath").asText("");
+            String publicUrl = root.path("publicUrl").asText("");
+            String absolutePath = root.path("absolutePath").asText("");
+            String resolvedModel = root.path("model").asText(model);
+            String markdown = "![" + brief.alt() + "](" + assetPath + ")";
             if (!brief.caption().isBlank()) {
                 markdown += "\n\n> " + brief.caption();
             }
             return new AiImageResponse(
                     markdown,
-                    saved.assetPath(),
-                    saved.publicUrl(),
-                    saved.absolutePath(),
+                    assetPath,
+                    publicUrl,
+                    absolutePath,
                     brief.prompt(),
                     brief.alt(),
                     brief.caption(),
-                    image.model()
+                    provider + "/" + resolvedModel
             );
-        } catch (IOException e) {
-            throw new AiWritingException(500, "图片保存失败: " + e.getMessage());
+        } catch (AiWritingException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new AiWritingException(502, "GLM 图片生成结果解析失败: " + e.getMessage());
         }
     }
 
-    private boolean usesPollinations(String baseUrl) {
-        String value = baseUrl == null ? "" : baseUrl.trim().toLowerCase();
-        return value.isBlank()
-                || value.equals("pollinations")
-                || value.contains("image.pollinations.ai");
+    private String imageModel() {
+        String model = configValue("image_model", DEFAULT_ZAI_IMAGE_MODEL).trim();
+        return model.isBlank() ? DEFAULT_ZAI_IMAGE_MODEL : model;
     }
 
-    private String resolveImageApiKey(String imageBaseUrl) {
-        String imageApiKey = configValue("image_api_key", "").trim();
-        if (!imageApiKey.isBlank()) {
-            return imageApiKey;
-        }
-        String aiBaseUrl = configValue("ai_base_url", AiWritingService.DEFAULT_BASE_URL).trim();
-        if (sameService(imageBaseUrl, aiBaseUrl)) {
-            return configValue("ai_api_key", "").trim();
+    private String imageQuality() {
+        String quality = configValue("image_quality", "2k").trim().toLowerCase(Locale.ROOT);
+        return quality.equals("normal") ? "normal" : "2k";
+    }
+
+    private String aspectRatio(AiImageRequest request) {
+        return switch (promptFactory.normalizePurpose(request)) {
+            case "hero" -> "16:9";
+            case "cover" -> "3:4";
+            default -> "1:1";
+        };
+    }
+
+    private String firstConfig(String... keys) {
+        for (String key : keys) {
+            String value = configValue(key, "").trim();
+            if (!value.isBlank()) {
+                return value;
+            }
         }
         return "";
-    }
-
-    private boolean sameService(String left, String right) {
-        try {
-            java.net.URI leftUri = new java.net.URI(left == null || left.isBlank() ? DEFAULT_IMAGE_BASE_URL : left);
-            java.net.URI rightUri = new java.net.URI(right == null || right.isBlank() ? AiWritingService.DEFAULT_BASE_URL : right);
-            String leftHost = leftUri.getHost();
-            String rightHost = rightUri.getHost();
-            return leftHost != null && rightHost != null && leftHost.equalsIgnoreCase(rightHost);
-        } catch (java.net.URISyntaxException e) {
-            return false;
-        }
     }
 
     private String configValue(String key, String fallback) {

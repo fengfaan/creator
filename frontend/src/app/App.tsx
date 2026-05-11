@@ -4,6 +4,7 @@ import { FileSidebar } from "./components/file-sidebar";
 import { EditorPanel } from "./components/editor-panel";
 import { PreviewPanel } from "./components/preview-panel";
 import { PublishModal } from "./components/publish-modal";
+import { DistributionConsole } from "./components/distribution-console";
 import { SettingsModal } from "./components/settings-modal";
 import { api } from "./api";
 
@@ -27,6 +28,8 @@ export default function App() {
   const [activePlatform, setActivePlatform] = useState<PlatformId>("wechat");
   const [leftPct, setLeftPct] = useState(50);
   const [publishOpen, setPublishOpen] = useState(false);
+  const [distOpen, setDistOpen] = useState(false);
+  const [coverPath, setCoverPath] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [savedContent, setSavedContent] = useState("");
   const [mobilePane, setMobilePane] = useState<MobilePane>("editor");
@@ -87,19 +90,40 @@ export default function App() {
     }
   }, []);
 
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+
+  const doSave = useCallback(async (nextOutline: string, nextDrafts: PlatformDrafts) => {
+    if (!filePath) return;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    setSaveStatus("saving");
+    try {
+      const serialized = serializeDraftFile(nextOutline, nextDrafts);
+      await api.files.save(filePath, serialized);
+      setSavedContent(serialized);
+      setSaveStatus("saved");
+      setTimeout(() => setSaveStatus("idle"), 2000);
+    } catch (e) {
+      console.error("Save failed:", e);
+      setSaveStatus("error");
+    }
+  }, [filePath]);
+
   const queueSave = useCallback((nextOutline: string, nextDrafts: PlatformDrafts) => {
     if (!filePath) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(async () => {
-      try {
-        const serialized = serializeDraftFile(nextOutline, nextDrafts);
-        await api.files.save(filePath, serialized);
-        setSavedContent(serialized);
-      } catch (e) {
-        console.error("Auto-save failed:", e);
+    saveTimerRef.current = setTimeout(() => doSave(nextOutline, nextDrafts), 1000);
+  }, [filePath, doSave]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+        e.preventDefault();
+        doSave(outline, drafts);
       }
-    }, 1000);
-  }, [filePath]);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [outline, drafts, doSave]);
 
   const handleContentChange = useCallback((newContent: string) => {
     setDrafts((current) => {
@@ -112,6 +136,24 @@ export default function App() {
   const handlePlatformContentChange = useCallback((platform: PlatformId, newContent: string) => {
     setDrafts((current) => {
       const next = { ...current, [platform]: newContent };
+      queueSave(outline, next);
+      return next;
+    });
+  }, [outline, queueSave]);
+
+  const handleTitleChange = useCallback((newTitle: string) => {
+    setTitle(newTitle);
+    setDrafts((current) => {
+      const next = { ...current };
+      for (const key of Object.keys(next) as PlatformId[]) {
+        const draft = next[key];
+        if (draft.startsWith("# ")) {
+          const afterHeading = draft.indexOf("\n");
+          next[key] = "# " + newTitle + (afterHeading >= 0 ? draft.slice(afterHeading) : "");
+        } else {
+          next[key] = "# " + newTitle + (draft ? "\n" + draft : "");
+        }
+      }
       queueSave(outline, next);
       return next;
     });
@@ -137,11 +179,14 @@ export default function App() {
         <TopBar
           fileName={fileName}
           model={aiModel}
+          isDirty={isDirty}
+          saveStatus={saveStatus}
           onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
           isDark={isDark}
           onToggleTheme={() => setIsDark(!isDark)}
+          onSave={() => doSave(outline, drafts)}
           onPublish={() => {
-            setPublishOpen(true);
+            setDistOpen(true);
           }}
           onOpenSettings={() => setSettingsOpen(true)}
           onModelChange={setAiModel}
@@ -189,7 +234,7 @@ export default function App() {
             <div style={{ width: `${leftPct}%` }} className="editor-pane flex flex-col min-w-0 min-h-0">
               <EditorPanel
                 title={title}
-                setTitle={setTitle}
+                setTitle={handleTitleChange}
                 outline={outline}
                 setOutline={handleOutlineChange}
                 content={activeContent}
@@ -198,6 +243,7 @@ export default function App() {
                 setActivePlatform={setActivePlatform}
                 platformDrafts={drafts}
                 setPlatformContent={handlePlatformContentChange}
+                onCoverGenerated={setCoverPath}
               />
             </div>
             <div className="resize-divider" onMouseDown={startDrag} onDoubleClick={() => setLeftPct(50)} />
@@ -212,6 +258,8 @@ export default function App() {
             </div>
           </div>
         </div>
+
+        {distOpen && <DistributionConsole title={title} content={activeContent} coverPath={coverPath} onCoverPathChange={setCoverPath} />}
 
         <div
           className="flex items-center justify-between h-7 px-4 shrink-0"
@@ -228,14 +276,13 @@ export default function App() {
             <span className="flex items-center gap-1">
               <span
                 className="inline-block w-1.5 h-1.5 rounded-full"
-                style={{ background: isDirty ? "var(--status-warning)" : "var(--status-success)" }}
+                style={{ background: saveStatus === "error" ? "var(--status-error)" : isDirty ? "var(--status-warning)" : "var(--status-success)" }}
                 aria-hidden="true"
               />
-              {isDirty ? "未保存" : "已自动保存"}
+              {saveStatus === "saving" ? "保存中..." : saveStatus === "saved" ? "已保存" : saveStatus === "error" ? "保存失败" : isDirty ? "未保存" : "已自动保存"}
             </span>
             <span>UTF-8</span>
             <span>Markdown</span>
-            <span>分发控制台 未打开 · 0 logs</span>
           </div>
           <div className="flex items-center gap-3">
             <span>{wordCount} 字</span>

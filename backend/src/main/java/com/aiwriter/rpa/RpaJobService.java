@@ -1,11 +1,16 @@
 package com.aiwriter.rpa;
 
+import com.aiwriter.model.AiCheckIssue;
 import com.aiwriter.model.RpaJobResponse;
 import com.aiwriter.model.RpaLogEntry;
 import com.aiwriter.model.RpaPublishRequest;
+import com.aiwriter.service.AiContentCheckService;
 import jakarta.annotation.PreDestroy;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -13,6 +18,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -23,18 +29,25 @@ import java.util.concurrent.atomic.AtomicLong;
 @Service
 public class RpaJobService {
     private static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm:ss");
+    private static final Set<String> BLOCKING_CATEGORIES = Set.of("联系方式", "外部导购");
 
     private final Map<String, RpaJobState> jobs = new ConcurrentHashMap<>();
     private final Map<String, RpaPublisher> publishers;
+    private final Path articlesDir;
+    private final AiContentCheckService contentCheckService;
     private final ExecutorService executor = Executors.newSingleThreadExecutor(r -> {
         Thread thread = new Thread(r, "rpa-job-worker");
         thread.setDaemon(true);
         return thread;
     });
 
-    public RpaJobService(List<RpaPublisher> publishers) {
+    public RpaJobService(List<RpaPublisher> publishers,
+                         @Value("${app.articles-dir:${app.data-dir}/articles}") String articlesDir,
+                         AiContentCheckService contentCheckService) {
         this.publishers = publishers.stream()
                 .collect(java.util.stream.Collectors.toMap(RpaPublisher::platform, publisher -> publisher));
+        this.articlesDir = Path.of(articlesDir).toAbsolutePath().normalize();
+        this.contentCheckService = contentCheckService;
     }
 
     public RpaJobResponse start(RpaPublishRequest request) {
@@ -43,10 +56,11 @@ public class RpaJobService {
         if (publisher == null) {
             throw new RpaException(400, "当前只支持小红书 RPA");
         }
-        if (request.getTitle() == null || request.getTitle().isBlank()) {
+        RpaPublishRequest normalizedRequest = normalizeRequest(platform, request);
+        if (normalizedRequest.getTitle() == null || normalizedRequest.getTitle().isBlank()) {
             throw new RpaException(400, "标题不能为空");
         }
-        if (request.getContent() == null || request.getContent().isBlank()) {
+        if (normalizedRequest.getContent() == null || normalizedRequest.getContent().isBlank()) {
             throw new RpaException(400, "正文不能为空");
         }
 
@@ -55,7 +69,7 @@ public class RpaJobService {
         jobs.put(jobId, state);
         state.add("INFO", "任务已创建，等待浏览器执行");
 
-        executor.submit(() -> runJob(state, request, publisher));
+        executor.submit(() -> runJob(state, normalizedRequest, publisher));
         return state.toResponse("任务已开始");
     }
 
@@ -89,6 +103,20 @@ public class RpaJobService {
         state.status = "RUNNING";
         state.add("INFO", "开始准备小红书草稿");
         try {
+            List<AiCheckIssue> issues = contentCheckService.localCheck(request.getTitle(), request.getContent());
+            List<AiCheckIssue> blocking = issues.stream()
+                    .filter(i -> BLOCKING_CATEGORIES.contains(i.getCategory()))
+                    .toList();
+            if (!blocking.isEmpty()) {
+                state.status = "FAILED";
+                for (AiCheckIssue issue : blocking) {
+                    state.add("ERROR", "内容风险[%s]: 命中「%s」，%s".formatted(issue.getCategory(), issue.getTerm(), issue.getSuggestion()));
+                }
+                return;
+            }
+            for (AiCheckIssue issue : issues) {
+                state.add("WARN", "内容提示[%s]: 命中「%s」，%s".formatted(issue.getCategory(), issue.getTerm(), issue.getSuggestion()));
+            }
             publisher.prepareDraft(state.jobId, request, state::add);
             state.status = "WAITING_CONFIRMATION";
             state.add("WARN", "已停在人工确认步骤，请检查页面后点击确认发布");
@@ -122,6 +150,27 @@ public class RpaJobService {
             return "xhs";
         }
         return platform.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private RpaPublishRequest normalizeRequest(String platform, RpaPublishRequest request) {
+        RpaPublishRequest normalized = request == null ? new RpaPublishRequest() : request;
+        normalized.setPlatform(platform);
+        normalized.setCoverPath(resolveCoverPath(normalized.getCoverPath()));
+        if ("xhs".equals(platform)) {
+            return XhsContentFormatter.format(normalized);
+        }
+        return normalized;
+    }
+
+    private String resolveCoverPath(String coverPath) {
+        if (coverPath == null || coverPath.isBlank()) return coverPath;
+        Path path = Path.of(coverPath).toAbsolutePath().normalize();
+        if (Files.exists(path)) return path.toString();
+        // Try the image filename directly under articlesDir/assets/images/
+        String fileName = path.getFileName().toString();
+        Path candidate = articlesDir.resolve("assets/images").resolve(fileName).toAbsolutePath().normalize();
+        if (Files.exists(candidate)) return candidate.toString();
+        return path.toString();
     }
 
     @PreDestroy

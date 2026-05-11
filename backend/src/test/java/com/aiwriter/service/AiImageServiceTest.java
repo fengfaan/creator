@@ -1,6 +1,7 @@
 package com.aiwriter.service;
 
 import com.aiwriter.ai.AiGateway;
+import com.aiwriter.ai.BaoyuImagineTool;
 import com.aiwriter.ai.ChatRequest;
 import com.aiwriter.ai.ChatResponse;
 import com.aiwriter.ai.ImageGenerationRequest;
@@ -15,7 +16,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
 import java.nio.file.Path;
-import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -44,9 +44,11 @@ class AiImageServiceTest {
     }
 
     @Test
-    void coverPromptUsesXhsCoverRulesAndThreeToFourSizeThroughGateway() {
-        AtomicReference<ImageGenerationRequest> imageRequest = new AtomicReference<>();
-        AiImageService service = serviceWithGateway(new CapturingGateway(imageRequest));
+    void coverGenerationAlwaysUsesGlmImageThroughBaoyuImagine() {
+        configService.set("image_api_key", "glm-key");
+        configService.set("image_model", "glm-image");
+        CapturingBaoyuImagineTool baoyuTool = new CapturingBaoyuImagineTool(configService);
+        AiImageService service = serviceWithBaoyu(baoyuTool);
 
         AiImageResponse response = service.generate(new AiImageRequest(
                 "cover",
@@ -55,29 +57,30 @@ class AiImageServiceTest {
                 ""
         ));
 
-        assertThat(response.getPrompt())
+        assertThat(baoyuTool.provider).isEqualTo("zai");
+        assertThat(baoyuTool.model).isEqualTo("glm-image");
+        assertThat(baoyuTool.aspectRatio).isEqualTo("3:4");
+        assertThat(baoyuTool.quality).isEqualTo("2k");
+        assertThat(baoyuTool.prompt)
                 .contains("Xiaohongshu Little Red Book style cover image")
-                .contains("portrait 3:4")
-                .contains("rounded information-card blocks")
                 .contains("No readable text");
-        assertThat(imageRequest.get().baseUrl()).isEqualTo("https://image.pollinations.ai");
-        assertThat(imageRequest.get().model()).isEqualTo("sana");
-        assertThat(imageRequest.get().size()).isEqualTo("1024x1365");
+        assertThat(response.getMarkdown()).isEqualTo("![根据文章《AI 写作工作流》生成的小红书封面](assets/images/test.png)");
+        assertThat(response.getUrl()).isEqualTo("/api/v1/assets/images/test.png");
+        assertThat(response.getModel()).isEqualTo("zai/glm-image");
     }
 
     @Test
-    void openAiCompatibleProviderRequiresImageApiKeyBeforeCallingGateway() {
-        configService.set("image_base_url", "https://api.openai.com/v1");
-        configService.set("image_model", "gpt-image-1");
-        AiImageService service = serviceWithGateway(new CapturingGateway(new AtomicReference<>()));
+    void glmGenerationRequiresImageApiKey() {
+        AiImageService service = serviceWithBaoyu(new CapturingBaoyuImagineTool(configService));
 
         assertThatThrownBy(() -> service.generate(null))
                 .isInstanceOf(AiWritingException.class)
-                .hasMessage("请先在设置中配置图片 API Key，或把图片 Base URL 设为 image.pollinations.ai 使用免 Key 图片生成")
+                .hasMessage("请先在设置中配置 GLM/Z.AI 图片 API Key")
                 .satisfies(e -> assertThat(((AiWritingException) e).getStatus()).isEqualTo(400));
     }
 
-    private AiImageService serviceWithGateway(AiGateway gateway) {
+    private AiImageService serviceWithBaoyu(BaoyuImagineTool baoyuTool) {
+        PromptLoader promptLoader = new PromptLoader(configService);
         return new AiImageService(
                 configService,
                 new AiImagePromptFactory(
@@ -85,30 +88,12 @@ class AiImageServiceTest {
                         (TextOnlyGateway) request -> {
                             throw new AssertionError("Text AI gateway should not be called without an API key");
                         },
-                        new ObjectMapper()
+                        new ObjectMapper(),
+                        promptLoader
                 ),
-                gateway,
-                new StubImageAssetService()
+                baoyuTool,
+                new ObjectMapper()
         );
-    }
-
-    private static class CapturingGateway implements AiGateway {
-        private final AtomicReference<ImageGenerationRequest> imageRequest;
-
-        CapturingGateway(AtomicReference<ImageGenerationRequest> imageRequest) {
-            this.imageRequest = imageRequest;
-        }
-
-        @Override
-        public ChatResponse complete(ChatRequest request) {
-            throw new AssertionError("Text completion should not be called in this test");
-        }
-
-        @Override
-        public ImageGenerationResponse generateImage(ImageGenerationRequest request) {
-            imageRequest.set(request);
-            return new ImageGenerationResponse(new byte[]{1, 2, 3}, request.model(), "jpg");
-        }
     }
 
     private interface TextOnlyGateway extends AiGateway {
@@ -118,15 +103,46 @@ class AiImageServiceTest {
         }
     }
 
-    private static class StubImageAssetService extends ImageAssetService {
-        @Override
-        public SavedImage saveJpeg(byte[] bytes, String purpose) {
-            return new SavedImage("assets/images/test.jpg", "/api/v1/assets/images/test.jpg", "/tmp/test.jpg");
+    private class CapturingBaoyuImagineTool extends BaoyuImagineTool {
+        String prompt;
+        String aspectRatio;
+        String quality;
+        String provider;
+        String model;
+
+        CapturingBaoyuImagineTool(ConfigService configService) {
+            super(
+                    configService,
+                    new ObjectMapper(),
+                    tempDir.resolve("skills/baoyu-imagine/scripts/main.ts").toString(),
+                    tempDir.resolve("articles").toString()
+            );
         }
 
         @Override
-        public SavedImage savePng(byte[] bytes, String purpose) {
-            return new SavedImage("assets/images/test.png", "/api/v1/assets/images/test.png", "/tmp/test.png");
+        public String generateImage(
+                String prompt,
+                String aspectRatio,
+                String quality,
+                String provider,
+                String model,
+                String purpose
+        ) {
+            this.prompt = prompt;
+            this.aspectRatio = aspectRatio;
+            this.quality = quality;
+            this.provider = provider;
+            this.model = model;
+            return """
+                    {
+                      "success": true,
+                      "assetPath": "assets/images/test.png",
+                      "publicUrl": "/api/v1/assets/images/test.png",
+                      "absolutePath": "/tmp/test.png",
+                      "provider": "zai",
+                      "model": "glm-image"
+                    }
+                    """;
         }
     }
 }
