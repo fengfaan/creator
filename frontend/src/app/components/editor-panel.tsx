@@ -21,6 +21,7 @@ interface Props {
   setActivePlatform: (platform: PlatformId) => void;
   platformDrafts: PlatformDrafts;
   setPlatformContent: (platform: PlatformId, content: string) => void;
+  onCoverGenerated?: (filePath: string) => void;
 }
 
 const PLATFORM_META: Record<PlatformId, { label: string; color: string; icon: React.ReactNode; source: string }> = {
@@ -49,6 +50,7 @@ export function EditorPanel({
   setActivePlatform,
   platformDrafts,
   setPlatformContent,
+  onCoverGenerated,
 }: Props) {
   const [showAI, setShowAI] = useState(false);
   const [outlineOpen, setOutlineOpen] = useState(false);
@@ -84,11 +86,12 @@ export function EditorPanel({
     try {
       const result = await api.ai.generate({
         action: "draft",
+        platform: activePlatform === "xhs" ? "xhs" : undefined,
         title,
         outline,
         content: platformPrompt(activePlatform, content),
       });
-      setContent(result.text);
+      setContent(preserveImages(content, result.text));
     } catch (err) {
       setGenerateError(err instanceof Error ? err.message : "正文生成失败");
     } finally {
@@ -102,6 +105,7 @@ export function EditorPanel({
     try {
       const result = await api.ai.generate({
         action: "draft",
+        platform: "xhs",
         title,
         outline,
         content: [
@@ -336,6 +340,7 @@ export function EditorPanel({
           title={title}
           outline={outline}
           content={platformPrompt(activePlatform, content)}
+          platform={activePlatform}
           onInsert={(text) => {
             insertAtCursor(text);
             setShowAI(false);
@@ -355,6 +360,7 @@ export function EditorPanel({
               }
             });
           }}
+          onCoverGenerated={onCoverGenerated}
           onClose={() => setShowAI(false)}
         />
       )}
@@ -375,4 +381,14 @@ function platformPrompt(platform: PlatformId, content: string) {
     "",
     content,
   ].join("\n");
+}
+
+const IMAGE_BLOCK_RE = /!\[[^\]]*\]\([^)]+\)(?:\s*\n> .+)*/g;
+
+function preserveImages(oldContent: string, newContent: string): string {
+  const oldImages = oldContent.match(IMAGE_BLOCK_RE);
+  if (!oldImages || oldImages.length === 0) return newContent;
+  const missing = oldImages.filter((img) => !newContent.includes(img.split("\n")[0]));
+  if (missing.length === 0) return newContent;
+  return newContent.trimEnd() + "\n\n" + missing.join("\n\n");
 }

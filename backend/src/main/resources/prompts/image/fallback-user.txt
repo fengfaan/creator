@@ -1,0 +1,7 @@
+An editorial illustration closely related to the topic: {title}.
+Article context: {content}.
+The image should visually represent the core subject matter of this article.
+If the article is about a specific topic (technology, food, travel, lifestyle, etc.), show a relevant scene with concrete objects and real-world settings.
+Style: warm editorial illustration with natural lighting, thoughtful composition, high quality.
+The image must make readers immediately think of the article's topic.
+Avoid readable text, logos, watermarks, QR codes, UI screenshots, clutter, distorted hands, low resolution, abstract concept diagrams, infographics.

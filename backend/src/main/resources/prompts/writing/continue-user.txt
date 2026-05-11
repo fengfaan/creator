@@ -1,0 +1,2 @@
+{context}
+请参考大纲续写后续内容，直接输出可插入正文的 Markdown 文本。{instruction}

@@ -1,0 +1,25 @@
+图片用途：小红书封面，竖版 3:4，像信息卡/封面图，而不是普通插画。
+画幅建议：{aspect}
+
+标题：
+{title}
+
+正文：
+{content}
+
+光标附近/参考内容：
+{referenceText}
+
+请仔细分析文章的核心主题，然后产出严格 JSON：prompt、alt、caption。
+prompt 必须适合 GLM/Z.AI 图片模型直接生成图片，并内化这些规则：
+- 先提取文章最具代表性的视觉意象，用具体物体/场景表达文章主题。
+- Portrait 3:4 cover, strong first-screen hook, sparse layout, one clear focal object.
+- Xiaohongshu style infographic cover, clean editorial composition, rounded information-card blocks, sticker-like accents, soft shadows.
+- Keep a safe content area, avoid important details in top-right and bottom 10%.
+- Use 1-2 large empty title-card shapes or abstract headline blocks, but do NOT render readable text.
+- Prefer hand-drawn editorial illustration or polished flat illustration; no photorealistic screenshot, no UI screenshot.
+- Use a fresh, warm, high-engagement palette with enough contrast; avoid clutter.
+- No readable text, no Chinese characters, no logo, no watermark, no QR code.
+- Keep prompt under 700 English words; prefer compact visual keywords over long explanation.
+- 封面图必须与文章主题强相关，让读者一眼知道文章讲什么。
+alt 用中文简短描述画面；caption 可为空或一句中文说明。

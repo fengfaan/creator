@@ -1,0 +1,8 @@
+标题：
+{title}
+
+大纲：
+{outline}
+
+当前正文：
+{content}

@@ -1,0 +1,2 @@
+{context}
+请生成一份适合继续写作的 Markdown 文章大纲。{instruction}

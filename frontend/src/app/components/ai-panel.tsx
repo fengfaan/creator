@@ -70,19 +70,22 @@ interface Props {
   title: string;
   outline: string;
   content: string;
+  platform?: "wechat" | "xhs";
   onInsert: (text: string) => void;
   onSaveOutline: (text: string) => void;
   onReplace: (text: string) => void;
+  onCoverGenerated?: (filePath: string) => void;
   onClose: () => void;
 }
 
-export function AIPanel({ title, outline, content, onInsert, onSaveOutline, onReplace, onClose }: Props) {
+export function AIPanel({ title, outline, content, platform, onInsert, onSaveOutline, onReplace, onCoverGenerated, onClose }: Props) {
   const [running, setRunning] = useState<string | null>(null);
   const [streamed, setStreamed] = useState<string>("");
   const [image, setImage] = useState<AiImageResponse | null>(null);
   const [activeAction, setActiveAction] = useState<AIAction | null>(null);
   const [error, setError] = useState("");
   const [model, setModel] = useState("");
+  const [instruction, setInstruction] = useState("");
 
   const runAction = async (action: AIAction) => {
     setRunning(action.id);
@@ -96,6 +99,7 @@ export function AIPanel({ title, outline, content, onInsert, onSaveOutline, onRe
           purpose: action.purpose || "inline",
           title,
           content,
+          referenceText: instruction.trim() || undefined,
         });
         setImage(result);
         setStreamed(result.markdown);
@@ -103,9 +107,11 @@ export function AIPanel({ title, outline, content, onInsert, onSaveOutline, onRe
       } else {
         const result = await api.ai.generate({
           action: action.id,
+          platform: platform === "xhs" ? "xhs" : undefined,
           title,
           outline,
           content,
+          instruction: instruction.trim() || undefined,
         });
         setStreamed(result.text);
         setModel(result.model);
@@ -122,9 +128,12 @@ export function AIPanel({ title, outline, content, onInsert, onSaveOutline, onRe
       if (activeAction?.id === "outline") {
         onSaveOutline(streamed);
       } else if (activeAction?.id === "polish" || activeAction?.id === "draft") {
-        onReplace(streamed);
+        onReplace(preserveImages(content, streamed));
       } else {
         onInsert(streamed);
+      }
+      if (activeAction?.kind === "image" && image?.filePath && onCoverGenerated) {
+        onCoverGenerated(image.filePath);
       }
     }
     setActiveAction(null);
@@ -171,6 +180,29 @@ export function AIPanel({ title, outline, content, onInsert, onSaveOutline, onRe
 
       {!activeAction ? (
         <div className="overflow-y-auto p-2">
+          <label className="block px-2 pt-1 pb-2">
+            <span
+              className="mb-1.5 block"
+              style={{ fontSize: 12, fontWeight: 600, color: "var(--text-secondary)" }}
+            >
+              自定义提示
+            </span>
+            <textarea
+              value={instruction}
+              onChange={(e) => setInstruction(e.target.value)}
+              rows={3}
+              className="w-full resize-none rounded-md px-3 py-2"
+              placeholder="例如：改成小红书风格，正文不超过 1000 字，改进建议分点输出。"
+              style={{
+                background: "var(--bg-deepest)",
+                border: "1px solid var(--border-default)",
+                color: "var(--text-primary)",
+                fontSize: 12,
+                lineHeight: 1.6,
+                outline: "none",
+              }}
+            />
+          </label>
           {ACTIONS.map((a) => (
             <button
               key={a.id}
@@ -393,4 +425,14 @@ function acceptLabel(action: AIAction) {
     default:
       return "插入图片";
   }
+}
+
+const IMAGE_BLOCK_RE = /!\[[^\]]*\]\([^)]+\)(?:\s*\n> .+)*/g;
+
+function preserveImages(oldContent: string, newContent: string): string {
+  const oldImages = oldContent.match(IMAGE_BLOCK_RE);
+  if (!oldImages || oldImages.length === 0) return newContent;
+  const missing = oldImages.filter((img) => !newContent.includes(img.split("\n")[0]));
+  if (missing.length === 0) return newContent;
+  return newContent.trimEnd() + "\n\n" + missing.join("\n\n");
 }

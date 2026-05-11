@@ -2,9 +2,11 @@ package com.aiwriter.model;
 
 public class AiGenerateRequest {
     private String action;
+    private String platform;
     private String title;
     private String outline;
     private String content;
+    private String instruction;
 
     public AiGenerateRequest() {
     }
@@ -20,6 +22,14 @@ public class AiGenerateRequest {
         this.title = title;
         this.outline = outline;
         this.content = content;
+    }
+
+    public AiGenerateRequest(String action, String title, String outline, String content, String instruction) {
+        this.action = action;
+        this.title = title;
+        this.outline = outline;
+        this.content = content;
+        this.instruction = instruction;
     }
 
     public String getAction() {
@@ -52,5 +62,21 @@ public class AiGenerateRequest {
 
     public void setContent(String content) {
         this.content = content;
+    }
+
+    public String getInstruction() {
+        return instruction;
+    }
+
+    public void setInstruction(String instruction) {
+        this.instruction = instruction;
+    }
+
+    public String getPlatform() {
+        return platform;
+    }
+
+    public void setPlatform(String platform) {
+        this.platform = platform;
     }
 }

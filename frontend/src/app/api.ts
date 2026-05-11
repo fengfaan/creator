@@ -39,9 +39,11 @@ export interface SettingItem {
 
 export interface AiGenerateRequest {
   action: "outline" | "draft" | "polish" | "continue";
+  platform?: "xhs";
   title: string;
   outline?: string;
   content: string;
+  instruction?: string;
 }
 
 export interface AiGenerateResponse {
@@ -87,6 +89,8 @@ export interface AiCheckResponse {
   status: "ok" | "warn" | "error";
   aiReviewed: boolean;
   model: string;
+  riskScore?: number | null;
+  riskLevel?: string;
   issues: AiCheckIssue[];
   aiReview: string;
 }

@@ -1,0 +1,8 @@
+Xiaohongshu Little Red Book style cover image, portrait 3:4, clean infographic cover.
+The cover must visually represent the article topic: {title}.
+Article context: {content}.
+Show a concrete, recognizable scene or object that directly relates to the article's core subject.
+Sparse layout, one clear focal object, rounded information-card blocks, abstract headline-card shapes,
+sticker-like accents, soft shadows, fresh warm palette, polished flat editorial illustration,
+safe content area, no important details in top-right or bottom 10 percent.
+No readable text, no Chinese characters, no logos, no watermarks, no QR codes, no UI screenshot.
